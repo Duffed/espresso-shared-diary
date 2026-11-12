@@ -12,7 +12,7 @@ export function Notice({ children }: { children: ReactNode }) {
   return children ? <p className="notice" role="status">{children}</p> : null
 }
 
-export function Photo({ photo, url }: { photo?: Blob; url?: string | null }) {
+export function Photo({ photo, url, className = '' }: { photo?: Blob; url?: string | null; className?: string }) {
   const [local, setLocal] = useState<string>()
   const [broken, setBroken] = useState(false)
   useEffect(() => {
@@ -23,7 +23,7 @@ export function Photo({ photo, url }: { photo?: Blob; url?: string | null }) {
   }, [photo])
   const src = local ?? url
   useEffect(() => setBroken(false), [src])
-  return <span className="photo" aria-hidden="true">
+  return <span className={'photo ' + className} aria-hidden="true">
     {src && !broken ? <img src={src} alt="" referrerPolicy="no-referrer" onError={() => setBroken(true)} /> :
       <span className="photo-placeholder">◉</span>}
   </span>

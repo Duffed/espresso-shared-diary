@@ -36,8 +36,11 @@ export default {
     if (!/^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(room) || query.length < 2 || query.length > 201) {
       return json({ error: 'Gib Hersteller und Modell ein.' }, 400)
     }
-    if (!env.BRAVE_SEARCH_KEY || !env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
-      return json({ error: 'Die Bildsuche ist noch nicht eingerichtet.' }, 503)
+    if (!env.BRAVE_SEARCH_KEY) {
+      return json({ error: 'Für die Bildsuche fehlt der Brave-API-Schlüssel. Du kannst ein eigenes Foto hochladen.' }, 503)
+    }
+    if (!env.SUPABASE_URL || !env.SUPABASE_PUBLISHABLE_KEY) {
+      return json({ error: 'Die Bildsuche ist noch nicht mit Supabase verbunden.' }, 503)
     }
     try {
       const access = await fetch(new URL('/rest/v1/rpc/in_room', env.SUPABASE_URL), {
@@ -53,6 +56,12 @@ export default {
         headers: { 'X-Subscription-Token': env.BRAVE_SEARCH_KEY, Accept: 'application/json' },
         signal: AbortSignal.timeout(8000),
       })
+      if (response.status === 401 || response.status === 403) {
+        return json({ error: 'Brave hat den API-Schlüssel abgelehnt oder die Bildsuche ist dafür nicht freigeschaltet.' }, 502)
+      }
+      if (response.status === 429) {
+        return json({ error: 'Das Limit der Bildsuche ist erreicht. Versuche es später erneut.' }, 429)
+      }
       if (!response.ok) return json({ error: 'Die Bildsuche ist gerade nicht verfügbar.' }, 502)
       const data = await response.json() as { results?: BraveImage[] }
       const results = (data.results ?? []).flatMap(item => {

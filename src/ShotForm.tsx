@@ -1,138 +1,118 @@
-import { useState, type FormEvent } from 'react'
-import { decimal, DiaryError, formatNumber, grinderName, onScale, parseGaggiMate, stepGrind,
-  type RoomData, type Shot, type ShotFields } from './model'
-import { errorText, Notice, Photo } from './ui'
+import { useEffect, useRef, useState, type FormEvent } from 'react'
+import { DiaryError, formatNumber, grinderName, onScale, parseGaggiMate, type RoomData, type Shot, type ShotFields } from './model'
+import { errorText, Notice } from './ui'
+import { BasketPicker } from './BasketPicker'
+import { api } from './data'
+import { Dial } from './Dial'
+import { BeanPhoto, Beans } from './Beans'
 
-const measures = [
-  { key: 'dose', label: 'Dosis (g)', max: 1000 },
-  { key: 'output', label: 'Output (g)', max: 10000 },
-  { key: 'temperature', label: 'Solltemperatur (°C)', max: 150 },
-  { key: 'duration', label: 'Laufzeit (s)', max: 86400 },
-] as const
-
-function dateInput(value = new Date().toISOString()) {
-  const date = new Date(value)
-  return new Date(date.getTime() - date.getTimezoneOffset() * 60000).toISOString().slice(0, 19)
-}
-
-export function ShotForm({ data, user, editing, onSave, onClose }: {
-  data: RoomData; user: string; editing?: Shot
+export function ShotForm({ data, user, editing, onSave, onClose, refresh }: {
+  data: RoomData; user: string; editing?: Shot; refresh: () => Promise<void>
   onSave: (fields: ShotFields, importKey: string | null) => Promise<void>; onClose: () => void
 }) {
-  const [grinderId, setGrinderId] = useState(editing?.grinder_id ?? '')
-  const [basketId, setBasketId] = useState(editing?.basket_id ?? '')
-  const [grind, setGrind] = useState(editing?.grind == null ? '' : formatNumber(editing.grind))
-  const [brewedAt, setBrewedAt] = useState(dateInput(editing?.brewed_at))
-  const [profile, setProfile] = useState(editing?.profile ?? '')
-  const [values, setValues] = useState(() => Object.fromEntries(measures.map(({ key }) =>
-    [key, editing?.[key] == null ? '' : formatNumber(editing[key])])))
+  const latest = data.shots.find(shot => shot.author_id === user)
+  const initial = editing ?? latest
+  const initialGrinder = data.grinders.find(g => g.id === initial?.grinder_id && (!g.archived || editing)) ?? (!initial ? data.grinders.find(g => !g.archived) : undefined)
+  const [stage, setStage] = useState(0)
+  const titleRef = useRef<HTMLHeadingElement>(null)
+  useEffect(() => { titleRef.current?.focus({ preventScroll: true }); window.scrollTo({ top: 0 }) }, [stage])
+  const [beanId, setBeanId] = useState(initial?.bean_id ?? '')
+  const [grinderId, setGrinderId] = useState(initialGrinder?.id ?? '')
+  const [basketId, setBasketId] = useState(data.baskets.find(b => b.id === initial?.basket_id && (!b.archived || editing))?.id ?? (!initial ? data.baskets.find(b => !b.archived)?.id : '') ?? '')
+  const [grind, setGrind] = useState(initialGrinder && initial?.grind != null && onScale(initial.grind, initialGrinder.minimum, initialGrinder.maximum, initialGrinder.step) ? initial.grind : initialGrinder?.minimum ?? 0)
+  const [addingProfile, setAddingProfile] = useState(false)
+  const [newProfile, setNewProfile] = useState('')
+  const canSaveProfile = navigator.onLine && data.members.some(member => member.user_id === user && member.admin)
+  const [profile, setProfile] = useState(initial?.profile ?? '')
+  const [values, setValues] = useState({ dose: initial?.dose ?? 18, output: initial?.output ?? 36, duration: initial?.duration ?? 30, temperature: initial?.temperature ?? 93 })
+  const [brewedAt, setBrewedAt] = useState(editing?.brewed_at ?? new Date().toISOString())
   const [importKey, setImportKey] = useState<string | null>(null)
-  const [warning, setWarning] = useState('')
   const [error, setError] = useState('')
+  const [warning, setWarning] = useState('')
   const [busy, setBusy] = useState(false)
-  const grinder = data.grinders.find(item => item.id === grinderId)
-  const profileNames = [...new Set([...data.profiles.filter(item => !item.archived).map(item => item.name), profile].filter(Boolean))]
-
+  const grinder = data.grinders.find(g => g.id === grinderId)
+  const recent = [...new Set(data.shots.filter(s => s.author_id === user).map(s => s.bean_id).filter(Boolean))].map(id => data.beans?.find(b => b.id === id)).filter(b => b && !b.archived).slice(0, 3)
+  const otherBeans = (data.beans ?? []).filter(bean => (!bean.archived || bean.id === beanId) && !recent.some(item => item?.id === bean.id))
+  const profiles = [...new Set(['', ...data.profiles.filter(p => !p.archived).map(p => p.name), profile])]
+  const titles = ['Welche Bohne?', 'Dein Mahlgrad', 'Wie viel Kaffee?', 'Dein Profil', 'Wie lief der Bezug?']
+  const hints = ['Dein Kaffee macht den Unterschied.', 'Am äußeren Ring fein einstellen.', 'Die Kaffeemenge im Sieb.', 'So möchtest du deinen Espresso beziehen.', 'Menge in der Tasse und Bezugszeit.']
+  async function addProfile() {
+    const name = newProfile.trim()
+    if (!name) { setError('Gib deinem Profil einen Namen.'); return }
+    setError(''); setBusy(true)
+    try {
+      if (canSaveProfile && !data.profiles.some(item => item.name === name && !item.archived)) {
+        const result = await api.from('profiles').insert({ room_id: data.room.id, name })
+        if (result.error) throw result.error
+        await refresh()
+      }
+      setProfile(name); setAddingProfile(false); setNewProfile('')
+    } catch { setError('Das Profil konnte nicht gespeichert werden. Bitte versuche es erneut.') }
+    finally { setBusy(false) }
+  }
+  function selectBean(id: string) { setBeanId(id); setStage(1) }
   function selectGrinder(id: string) {
     setGrinderId(id)
-    const scale = data.grinders.find(item => item.id === id)
-    const last = data.shots.find(shot => shot.author_id === user && shot.grinder_id === id && shot.grind !== null)
-    setGrind(scale && last?.grind != null && onScale(last.grind, scale.minimum, scale.maximum, scale.step)
-      ? formatNumber(last.grind) : '')
+    const scale = data.grinders.find(g => g.id === id)
+    const last = data.shots.find(s => s.author_id === user && s.grinder_id === id && s.grind !== null)
+    setGrind(scale && last?.grind != null && onScale(last.grind, scale.minimum, scale.maximum, scale.step) ? last.grind : scale?.minimum ?? 0)
   }
-
-  async function importShot(file: File) {
-    setError('')
-    setBusy(true)
-    try {
-      if (file.size > 5 * 1024 * 1024) throw new DiaryError('Die Datei darf höchstens 5 MB groß sein.')
-      const result = await parseGaggiMate(await file.text())
-      if (data.shots.some(shot => shot.import_key === result.importKey)) {
-        throw new DiaryError('Dieser GaggiMate-Bezug wurde bereits importiert.')
-      }
-      setImportKey(result.importKey)
-      setBrewedAt(dateInput(result.fields.brewed_at))
-      setProfile(result.fields.profile ?? '')
-      setValues(Object.fromEntries(measures.map(({ key }) => {
-        const value = result.fields[key]
-        return [key, value == null ? '' : formatNumber(value)]
-      })))
-      setWarning(result.incomplete ? 'Die GaggiMate-Aufzeichnung ist unvollständig. Bitte prüfe die Werte.' : '')
-    } catch (reason) { setError(errorText(reason, 'Die Datei konnte nicht gelesen werden.')) }
-    finally { setBusy(false) }
-  }
-
   async function submit(event: FormEvent) {
     event.preventDefault()
-    setError('')
-    setBusy(true)
+    if (stage < 4) { setStage(stage + 1); return }
+    setBusy(true); setError('')
     try {
-      const value = decimal(grind)
-      if (grind.trim() && (!grinder || value === null ||
-        (!(editing?.grinder_id === grinderId && editing?.grind === value)
-          && !onScale(value, grinder.minimum, grinder.maximum, grinder.step)))) {
-        throw new DiaryError('Wähle einen Mahlgrad auf der Skala der Mühle.')
-      }
-      const numeric = Object.fromEntries(measures.map(({ key, label, max }) => {
-        const raw = values[key].trim()
-        const number = decimal(raw)
-        if (raw && (number === null || number <= 0 || number > max || (number === max && key !== 'temperature'))) {
-          throw new DiaryError('Prüfe den Wert für ' + label + '.')
-        }
-        return [key, number]
-      })) as Pick<ShotFields, typeof measures[number]['key']>
-      await onSave({
-        ...numeric, brewed_at: new Date(brewedAt).toISOString(), grinder_id: grinderId || null,
-        basket_id: basketId || null, grind: value, profile: profile || null,
-      }, importKey)
-    } catch (reason) { setError(errorText(reason)) }
-    finally { setBusy(false) }
+      if (grinder && !onScale(grind, grinder.minimum, grinder.maximum, grinder.step) && !(editing?.grind === grind && editing.grinder_id === grinder.id)) throw new DiaryError('Wähle einen Mahlgrad auf der Skala der Mühle.')
+      if (values.dose <= 0 || values.dose >= 1000 || values.output <= 0 || values.output >= 10000 || values.duration <= 0 || values.duration >= 86400 || values.temperature <= 0 || values.temperature > 150) throw new DiaryError('Bitte prüfe die Mengen, Zeit und Temperatur.')
+      await onSave({ ...values, ...(beanId || editing?.bean_id ? { bean_id: beanId || null } : {}), brewed_at: brewedAt, grinder_id: grinderId || null, basket_id: basketId || null, grind: grinder ? grind : null, profile: profile || null }, importKey)
+    } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
   }
-
-  return <section className="panel shot-form" aria-labelledby="shot-title">
-    <div className="section-heading"><h2 id="shot-title">{editing ? 'Bezug bearbeiten' : 'Neuer Bezug'}</h2>
-      <button type="button" className="quiet" onClick={onClose}>Schließen</button></div>
+  async function importShot(file: File) {
+    setBusy(true); setError('')
+    try {
+      if (file.size > 5242880) throw new DiaryError('Die Datei darf höchstens 5 MB groß sein.')
+      const result = await parseGaggiMate(await file.text())
+      if (data.shots.some(s => s.import_key === result.importKey)) throw new DiaryError('Dieser GaggiMate-Bezug wurde bereits importiert.')
+      setImportKey(result.importKey); setBrewedAt(result.fields.brewed_at!); setProfile(result.fields.profile ?? '')
+      setValues(previous => ({ dose: result.fields.dose ?? previous.dose, output: result.fields.output ?? previous.output, duration: result.fields.duration ?? previous.duration, temperature: result.fields.temperature ?? previous.temperature }))
+      setWarning(result.incomplete ? 'Die Aufzeichnung ist unvollständig. Bitte prüfe die Werte.' : 'Import geladen. Bitte prüfe die Werte.')
+    } catch (reason) { setError(errorText(reason)) } finally { setBusy(false) }
+  }
+  const measure = (key: keyof typeof values, label: string, unit: string, max: number) => <Dial label={label} unit={unit} value={values[key]} min={0.1} max={Math.max(max, values[key])} step={0.1} onChange={value => setValues(previous => ({ ...previous, [key]: value }))} />
+  return <section className="panel shot-form" data-step={stage} aria-labelledby="shot-title">
+    <div className="section-heading"><span className="eyebrow">{editing ? 'Bezug bearbeiten' : 'Neuer Bezug'} · {stage + 1} / 5</span><button type="button" className="quiet" disabled={busy} onClick={onClose}>Schließen</button></div>
+    <div className="step-track" aria-label="Fortschritt">{titles.map((title, i) => <button key={title} type="button" disabled={busy} aria-label={`Schritt ${i + 1}: ${title}`} aria-current={stage === i ? 'step' : undefined} className={i <= stage ? 'done' : ''} onClick={() => setStage(i)} />)}</div>
+    <h2 ref={titleRef} tabIndex={-1} id="shot-title">{titles[stage]}</h2><p className="step-hint">{hints[stage]}</p>
+    {!editing && latest && <p className="previous-hint">Deine letzten Werte sind schon eingestellt.</p>}
+    {stage === 0 && <Beans data={data} refresh={refresh} onSelect={bean => selectBean(bean.id)} />}
     <form onSubmit={submit}>
-      {!editing && data.room.gaggimate && <label className="file-label">GaggiMate-Bezug importieren
-        <input type="file" accept=".json,application/json" disabled={busy} onChange={event => {
-          const file = event.target.files?.[0]
-          event.target.value = ''
-          if (file) void importShot(file)
-        }} />
-      </label>}
-      <Notice>{warning}</Notice>
-      <div className="grid">
-        <label>Zeitpunkt<input type="datetime-local" required step="1" value={brewedAt} onChange={e => setBrewedAt(e.target.value)} /></label>
-        <label>Profil<select value={profile} onChange={e => setProfile(e.target.value)}>
-          <option value="">Kein Profil</option>{profileNames.map(name => <option key={name}>{name}</option>)}
-        </select></label>
-      </div>
-      <fieldset><legend>Mühle</legend><div className="tiles">
-        <button type="button" aria-pressed={!grinderId} onClick={() => selectGrinder('')}>Keine</button>
-        {data.grinders.filter(item => !item.archived || item.id === grinderId).map(item =>
-          <button type="button" key={item.id} aria-pressed={grinderId === item.id} onClick={() => selectGrinder(item.id)}>
-            <Photo photo={item.photo} url={item.image_url} />{grinderName(item)}
-          </button>)}
-      </div></fieldset>
-      {grinder && <label>Mahlgrad <small>{formatNumber(grinder.minimum)} bis {formatNumber(grinder.maximum)} · Schritt {formatNumber(grinder.step)}</small>
-        <span className="stepper">
-          <button type="button" aria-label="Mahlgrad verringern" onClick={() => setGrind(formatNumber(stepGrind(decimal(grind), grinder, -1)))}>−</button>
-          <input value={grind} inputMode="decimal" onChange={event => setGrind(event.target.value)} />
-          <button type="button" aria-label="Mahlgrad erhöhen" onClick={() => setGrind(formatNumber(stepGrind(decimal(grind), grinder, 1)))}>+</button>
-        </span></label>}
-      <fieldset><legend>Sieb</legend><div className="tiles">
-        <button type="button" aria-pressed={!basketId} onClick={() => setBasketId('')}>Keins</button>
-        {data.baskets.filter(item => !item.archived || item.id === basketId).map(item =>
-          <button type="button" key={item.id} aria-pressed={basketId === item.id} onClick={() => setBasketId(item.id)}>
-            <Photo photo={item.photo} />{item.name}
-            <small>{[item.capacity && formatNumber(item.capacity) + ' g', item.diameter && formatNumber(item.diameter) + ' mm', item.shape].filter(Boolean).join(' · ')}</small>
-          </button>)}
-      </div></fieldset>
-      <div className="grid metrics">{measures.map(({ key, label }) =>
-        <label key={key}>{label}<input inputMode="decimal" value={values[key]} onChange={e =>
-          setValues(previous => ({ ...previous, [key]: e.target.value }))} /></label>)}</div>
-      <Notice>{error}</Notice>
-      <button className="primary" disabled={busy}>{busy ? 'Bitte warten …' : 'Bezug speichern'}</button>
+      <fieldset key={stage} className="wizard-fields" disabled={busy}>
+      {stage === 0 && <>
+        {recent.length > 0 && <section aria-label="Zuletzt verwendete Bohnen"><span className="eyebrow">Zuletzt verwendet</span>
+          <div className="recent-beans">{recent.map(bean => bean && <button type="button" className="bean-picture-card" key={bean.id} aria-pressed={beanId === bean.id} onClick={() => selectBean(bean.id)}>
+            <span className="bean-picture"><BeanPhoto bean={bean} /><span className="selection-tick" aria-hidden="true">{beanId === bean.id ? '✓' : ''}</span></span>
+            <strong>{bean.name}</strong><small>{bean.roaster || 'Kaffeesorte'}</small>
+          </button>)}</div></section>}
+        {otherBeans.length > 0 && <section><div className="section-heading"><span className="eyebrow">{recent.length ? 'Weitere Bohnen' : 'Alle Bohnen'}</span><small>{otherBeans.length} Sorten</small></div>
+          <div className="bean-scroll-list bean-grid" role="region" aria-label="Weitere Bohnen" tabIndex={0}>{otherBeans.map(bean => <button type="button" className="bean-picture-card" key={bean.id} aria-pressed={beanId === bean.id} onClick={() => selectBean(bean.id)}>
+            <span className="bean-picture"><BeanPhoto bean={bean} /><span className="selection-tick" aria-hidden="true">{beanId === bean.id ? '✓' : ''}</span></span><strong>{bean.name}</strong><small>{bean.roaster || 'Kaffeesorte'}</small>
+          </button>)}</div></section>}
+
+      </>}
+      {stage === 1 && <><label>Mühle<select value={grinderId} onChange={e => selectGrinder(e.target.value)}><option value="">Keine Mühle</option>{data.grinders.filter(g => !g.archived || g.id === grinderId).map(g => <option key={g.id} value={g.id}>{grinderName(g)}</option>)}</select></label>{grinder ? <Dial label="Mahlgrad" value={grind} min={grinder.minimum} max={grinder.maximum} step={grinder.step} onChange={setGrind} /> : <p className="empty">Mühlen fügst du in den Einstellungen hinzu. Du kannst diesen Schritt überspringen.</p>}</>}
+      {stage === 2 && <>{measure('dose', 'Dosis', 'g', 40)}<BasketPicker baskets={data.baskets} shots={data.shots} user={user} value={basketId} onChange={setBasketId} /></>}
+      {stage === 3 && <><div className="profile-options">{profiles.map(name => <button type="button" key={name} aria-pressed={profile === name} onClick={() => setProfile(name)}><span>◉</span>{name || 'Ohne Profil'}<span>{profile === name ? '✓' : ''}</span></button>)}</div><button type="button" className="add-profile-button" onClick={() => { setAddingProfile(true); setError('') }}>＋ Neues Profil</button>
+        {addingProfile && <div className="inline-profile"><label>Profilname<input autoFocus maxLength={100} value={newProfile} onChange={event => setNewProfile(event.target.value)} onKeyDown={event => { if (event.key === 'Enter') { event.preventDefault(); void addProfile() } }} /></label>
+          <small>{canSaveProfile ? 'Wird für alle im Raum gespeichert.' : 'Wird für diesen Bezug verwendet.'}</small>
+          <div className="actions"><button type="button" disabled={!newProfile.trim() || busy} onClick={() => void addProfile()}>{canSaveProfile ? 'Profil hinzufügen' : 'Profil verwenden'}</button><button type="button" className="quiet" onClick={() => { setAddingProfile(false); setNewProfile('') }}>Abbrechen</button></div>
+        </div>}</>}
+      {stage === 4 && <><div className="result-dials">{measure('output', 'Output', 'g', 100)}{measure('duration', 'Laufzeit', 's', 120)}</div><p className="ratio">Brühverhältnis <strong>1 : {formatNumber(Math.round(values.output / values.dose * 100) / 100)}</strong></p>
+        <details><summary>Weitere Angaben & Import</summary><label>Zeitpunkt<input type="datetime-local" required step="1" value={new Date(Date.parse(brewedAt) - new Date(brewedAt).getTimezoneOffset() * 60000).toISOString().slice(0, 19)} onChange={e => { if (e.target.value) setBrewedAt(new Date(e.target.value).toISOString()) }} /></label>{measure('temperature', 'Solltemperatur', '°C', 150)}
+        {!editing && data.room.gaggimate && <label>GaggiMate-Bezug importieren<input type="file" accept=".json,application/json" onChange={e => { const file = e.target.files?.[0]; e.target.value = ''; if (file) void importShot(file) }} /></label>}</details><Notice>{warning}</Notice>
+        <div className="recipe-summary">{data.beans?.find(b => b.id === beanId)?.name || 'Ohne Bohne'} · {formatNumber(values.dose)} g → {formatNumber(values.output)} g · {formatNumber(values.duration)} s</div>
+      </>}
+      </fieldset><Notice>{error}</Notice>
+      <div className="wizard-actions"><button type="button" disabled={busy} onClick={() => stage ? setStage(stage - 1) : onClose()}>{stage ? 'Zurück' : 'Abbrechen'}</button><button className="primary" disabled={busy}>{busy ? 'Wird gespeichert …' : stage === 4 ? 'Bezug speichern' : 'Weiter →'}</button></div>
     </form>
   </section>
 }

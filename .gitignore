@@ -6,3 +6,6 @@ dist/
 !.dev.vars.example
 .wrangler/
 supabase/.temp/
+
+# Generated browser-test screenshots
+tests/*.png

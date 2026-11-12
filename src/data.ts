@@ -1,12 +1,13 @@
 import { createClient } from '@supabase/supabase-js'
 import { openDB, type DBSchema } from 'idb'
-import type { Basket, Grinder, Invite, Member, Pending, Profile, Room, RoomData, Shot } from './model'
+import type { Bean, Basket, Grinder, Invite, Member, Pending, Profile, Room, RoomData, Shot } from './model'
 import { DiaryError } from './model'
 
 export const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
 export const api = createClient(
   import.meta.env.VITE_SUPABASE_URL || 'https://example.invalid',
   import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY || 'unconfigured',
+  { auth: { flowType: 'pkce' } },
 )
 
 interface DiaryCache extends DBSchema {
@@ -42,12 +43,12 @@ export async function loadRooms(user: string) {
   return data
 }
 
-async function attachPhotos<T extends Grinder | Basket>(items: T[], previous: T[]) {
+async function attachPhotos<T extends Grinder | Basket | Bean>(items: T[], previous: T[], bucket = 'equipment') {
   return Promise.all(items.map(async item => {
     if (!item.photo_path) return item
     const old = previous.find(photo => photo.photo_path === item.photo_path)?.photo
     if (old) return { ...item, photo: old }
-    const { data } = await api.storage.from('equipment').download(item.photo_path)
+    const { data } = await api.storage.from(bucket).download(item.photo_path)
     return data ? { ...item, photo: data } : item
   }))
 }
@@ -60,16 +61,18 @@ export async function loadRoom(user: string, roomId: string): Promise<RoomData> 
     await db.delete('details', [user, roomId])
     throw new DiaryError('Du hast keinen Zugriff mehr auf diesen Raum.')
   }
-  const [members, invites, grinders, baskets, profiles] = await Promise.all([
+  const [members, invites, grinders, baskets, profiles, beans] = await Promise.all([
     api.from('members').select('*').eq('room_id', roomId).order('name').returns<Member[]>(),
     api.from('invites').select('*').eq('room_id', roomId).order('expires_at', { ascending: false }).returns<Invite[]>(),
     api.from('grinders').select('*').eq('room_id', roomId).order('brand').returns<Grinder[]>(),
     api.from('baskets').select('*').eq('room_id', roomId).order('name').returns<Basket[]>(),
     api.from('profiles').select('*').eq('room_id', roomId).order('name').returns<Profile[]>(),
+    api.from('beans').select('*').eq('room_id', roomId).order('name').returns<Bean[]>(),
   ])
   for (const result of [members, invites, grinders, baskets, profiles]) {
     if (result.error) throw result.error
   }
+  if (beans.error && !['42P01', 'PGRST205'].includes(beans.error.code)) throw beans.error
   if (!members.data?.some(member => member.user_id === user)) {
     await db.delete('details', [user, roomId])
     throw new DiaryError('Du hast keinen Zugriff mehr auf diesen Raum.')
@@ -84,13 +87,14 @@ export async function loadRoom(user: string, roomId: string): Promise<RoomData> 
     if (page.data.length < pageSize) break
   }
   const previous = await db.get('details', [user, roomId])
-  const [grindersWithPhotos, basketsWithPhotos] = await Promise.all([
+  const [grindersWithPhotos, basketsWithPhotos, beansWithPhotos] = await Promise.all([
     attachPhotos(grinders.data ?? [], previous?.grinders ?? []),
     attachPhotos(baskets.data ?? [], previous?.baskets ?? []),
+    attachPhotos(beans.data ?? [], previous?.beans ?? [], 'bean-photos'),
   ])
   const data: RoomData = {
     room: room.data, members: members.data, invites: invites.data ?? [],
-    grinders: grindersWithPhotos, baskets: basketsWithPhotos, profiles: profiles.data ?? [], shots,
+    grinders: grindersWithPhotos, baskets: basketsWithPhotos, profiles: profiles.data ?? [], shots, beans: beansWithPhotos,
   }
   await db.put('details', data, [user, roomId])
   return data

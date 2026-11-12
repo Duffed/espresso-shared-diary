@@ -7,9 +7,12 @@ export type Grinder = Equipment & {
   brand: string; model: string; minimum: number; maximum: number; step: number
   image_url: string | null; source_url: string | null
 }
-export type Basket = Equipment & { name: string; capacity: number | null; diameter: number | null; shape: string }
+export type Basket = Equipment & { name: string; capacity: number | null }
 export type Profile = { id: string; name: string; archived: boolean }
+export type Bean = { id: string; room_id: string; name: string; roaster: string; archived: boolean; photo_path?: string | null; photo?: Blob }
 export type ShotFields = {
+  rating?: number | null
+  bean_id?: string | null
   brewed_at: string; grinder_id: string | null; basket_id: string | null; grind: number | null
   dose: number | null; temperature: number | null; output: number | null; duration: number | null
   profile: string | null
@@ -18,7 +21,7 @@ export type NewShot = ShotFields & { id: string; room_id: string; import_key: st
 export type Shot = NewShot & { author_id: string; author_name: string; version: number }
 export type RoomData = {
   room: Room; members: Member[]; invites: Invite[]; grinders: Grinder[]
-  baskets: Basket[]; profiles: Profile[]; shots: Shot[]
+  baskets: Basket[]; profiles: Profile[]; shots: Shot[]; beans?: Bean[]
 }
 export type Pending = { user: string; shot: NewShot; author: string; error?: string }
 
@@ -52,6 +55,12 @@ export const formatNumber = (value: number) => value.toLocaleString('de-DE', { m
 export const grinderName = (item: Grinder) => item.brand + ' ' + item.model
 
 export class DiaryError extends Error {}
+
+export function validateRoomPassword(password: string) {
+  if ([...password.trim()].length < 8 || new TextEncoder().encode(password).length > 72) {
+    throw new DiaryError('Das Raumpasswort braucht mindestens 8 Zeichen und darf höchstens 72 Bytes lang sein.')
+  }
+}
 
 export async function parseGaggiMate(raw: string): Promise<{
   fields: Partial<ShotFields>; importKey: string; incomplete: boolean
