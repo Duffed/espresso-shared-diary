@@ -505,7 +505,7 @@ details > label { margin: .6rem 0; }
 .bottom-nav button > span svg { width: 24px; height: 24px; }
 .dial-settings { margin: 1rem 0; }
 .dial-settings-grid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 1rem; margin-top: 1rem; }
-.swipe-entry { position: relative; overflow: hidden; border-radius: 22px; }
+.swipe-entry { position: relative; overflow: hidden; border-radius: 20px; }
 .swipe-entry[data-enabled] { touch-action: pan-y pinch-zoom; }
 .swipe-entry-content { position: relative; }
 .swipe-entry .entry { margin: 0; }
@@ -666,7 +666,6 @@ html:has(.top) { overscroll-behavior: none; }
   .home-screen > .section-heading { grid-column: 1 / -1; }
   .home-screen .brew-hero { padding: 1.6rem; }
   .home-screen .home-links { align-items: stretch; }
-  .chronicle { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
-  .chronicle .swipe-entry-content, .chronicle .history-entry { height: 100%; }
+  .chronicle { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
   .chronicle > .empty { grid-column: 1 / -1; }
 }
