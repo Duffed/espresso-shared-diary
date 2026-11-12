@@ -146,7 +146,7 @@ input, select { border-radius: 14px; min-height: 48px; }
 .entry .values div { background: transparent; padding: .2rem; }
 .entry .values dd { font-size: 1.1rem; }
 .bean-list { display: grid; gap: .7rem; margin: .8rem 0; }
-.bean-card { display: flex; align-items: center; gap: .8rem; width: 100%; background: var(--paper); border: 1px solid var(--line); border-radius: 18px; padding: 1rem; text-align: left; }
+.bean-card { display: flex; align-items: center; gap: .8rem; width: 100%; padding: 1rem; text-align: left; }
 .bean-card > span:nth-child(2) { flex: 1; min-width: 0; overflow-wrap: anywhere; }
 .bean-card small { display: block; margin-top: .25rem; font-weight: 400; }
 .bean-symbol { border-radius: 50%; background: var(--soft); color: var(--accent); width: 44px; height: 44px; display: grid; place-items: center; font-size: 1.8rem; }
@@ -378,7 +378,8 @@ details > label { margin: .6rem 0; }
   .shot-form[data-step="0"] .bean-scroll-list.bean-grid { max-height: clamp(90px, calc(100dvh - 555px), 220px); margin-top: .3rem; }
   .shot-form[data-step="0"] .wizard-actions { padding-top: .3rem; }
 }
-.history-entry { padding: 1rem 1rem .25rem; border-radius: 20px; }
+.history-entry, .bean-library .bean-card { background: var(--paper); border: 1px solid var(--line); border-radius: 20px; box-shadow: none; }
+.history-entry { padding: 1rem 1rem .25rem; }
 .entry-summary { display: grid; grid-template-columns: 66px minmax(0, 1fr); gap: .85rem; align-items: center; }
 .entry-photo .photo, .entry-photo .bean-symbol { width: 66px; height: 76px; border-radius: 12px; }
 .entry-photo .photo { position: relative; }
@@ -642,6 +643,9 @@ html:has(.top) { overscroll-behavior: none; }
 
 /* Expanded app layout: navigation rail and a wider, adaptive workspace. */
 @media(min-width:768px) {
+  .entry-detail-info { display: flex; align-items: center; flex-wrap: wrap; gap: .35rem 1rem; }
+  .entry-detail-body .meta { margin: 0; }
+  .entry-details[open] .entry-detail-body { margin-top: .65rem; padding: .4rem 0 0; }
   .top-inner { width: min(calc(100% - 48px), 1320px); max-width: none; min-height: 64px; }
   .workspace { width: min(calc(100% - 136px), 1200px); max-width: none; margin-left: max(112px, calc((100% - 1200px + 88px) / 2)); margin-right: auto; }
   .bottom-nav { top: 64px; bottom: 0; left: 0; transform: none; width: 88px; grid-template-columns: 1fr; grid-auto-rows: max-content; align-content: start; gap: 1rem; padding: 1.5rem .4rem; border-top: 0; border-right: 1px solid var(--line); }
@@ -662,6 +666,7 @@ html:has(.top) { overscroll-behavior: none; }
   .home-screen > .section-heading { grid-column: 1 / -1; }
   .home-screen .brew-hero { padding: 1.6rem; }
   .home-screen .home-links { align-items: stretch; }
-  .chronicle { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: start; }
+  .chronicle { grid-template-columns: repeat(2, minmax(0, 1fr)); align-items: stretch; }
+  .chronicle .swipe-entry-content, .chronicle .history-entry { height: 100%; }
   .chronicle > .empty { grid-column: 1 / -1; }
 }
