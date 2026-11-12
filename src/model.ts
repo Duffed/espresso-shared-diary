@@ -8,7 +8,7 @@ export type Grinder = Equipment & {
   image_url: string | null; source_url: string | null
 }
 export type Basket = Equipment & { name: string; capacity: number | null }
-export type Profile = { id: string; name: string; archived: boolean }
+export type Profile = { id: string; name: string; archived: boolean; sort_order?: number; ever_used?: boolean }
 export type Bean = { id: string; room_id: string; name: string; roaster: string; archived: boolean; photo_path?: string | null; photo?: Blob }
 export type ShotFields = {
   rating?: number | null

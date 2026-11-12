@@ -28,6 +28,7 @@ const photos = new Map()
 const shots = []
 let lostAcknowledgement = false
 let writeAttempts = 0
+let rejectDeletion = false
 
 function reply(response, value, status = 200) {
   response.writeHead(status, { 'Content-Type': 'application/json' })
@@ -88,7 +89,23 @@ const server = createServer(async (request, response) => {
       if (path.endsWith('/rooms')) return reply(response, single ? room : [room])
       if (path.endsWith('/members')) return reply(response, members)
       if (path.endsWith('/grinders')) return reply(response, [grinder])
-      if (path.endsWith('/profiles')) { if (request.method === 'POST') { profiles.push({ ...await body(request), id: 'new-profile', archived: false }); return reply(response, null, 201) } return reply(response, profiles) }
+      if (path.endsWith('/profiles')) {
+        if (request.method === 'POST') { profiles.push({ ...await body(request), id: crypto.randomUUID(), archived: false, ever_used: false, sort_order: 2147483647 }); return reply(response, null, 201) }
+        if (request.method === 'PATCH') { Object.assign(profiles.find(p => p.id === url.searchParams.get('id')?.replace(/^eq\./, '')), await body(request)); return reply(response, null) }
+        return reply(response, [...profiles].sort((a, b) => (a.sort_order ?? 2147483647) - (b.sort_order ?? 2147483647) || a.name.localeCompare(b.name)))
+      }
+      if (path.endsWith('/rpc/set_profile_order')) {
+        const { profile_ids } = await body(request)
+        profile_ids.forEach((id, index) => { profiles.find(p => p.id === id).sort_order = index + 1 })
+        return reply(response, null)
+      }
+      if (path.endsWith('/rpc/delete_unused_profile')) {
+        const { profile_id } = await body(request)
+        const index = profiles.findIndex(p => p.id === profile_id)
+        if (profiles[index].ever_used) return reply(response, { message: 'Bereits verwendet' }, 400)
+        profiles.splice(index, 1)
+        return reply(response, null)
+      }
       if (path.endsWith('/beans')) {
         if (request.method === 'POST') { const bean = { ...await body(request), id: '00000000-0000-0000-0000-000000000007', archived: false }; beans.push(bean); return reply(response, single ? bean : [bean], 201) }
         if (request.method === 'PATCH') { const bean = beans.find(b => b.id === url.searchParams.get('id')?.replace(/^eq\./, '')); Object.assign(bean, await body(request)); return reply(response, single ? bean : [bean]) }
@@ -114,11 +131,12 @@ const server = createServer(async (request, response) => {
         if (request.method === 'PATCH') {
           const shot = shots.find(item => item.id === id && item.author_id === user && item.version === Number(url.searchParams.get('version')?.replace(/^eq\./, '')))
           const fields = await body(request)
+          if (fields.deleted_at && rejectDeletion) return reply(response, { message: 'Test deletion failure' }, 503)
           if (!shot) return reply(response, null)
           Object.assign(shot, fields, { version: shot.version + 1 })
           return reply(response, shot)
         }
-        const found = id ? shots.filter(shot => shot.id === id) : shots
+        const found = id ? shots.filter(shot => shot.id === id) : shots.filter(shot => !shot.deleted_at)
         return reply(response, single ? found[0] ?? null : found)
       }
       return reply(response, [])
@@ -146,7 +164,7 @@ async function login(page, email) {
   await page.context().addCookies([{ name: 'test-account', value: encodeURIComponent(email), url: origin }])
   await page.goto(origin)
   await page.getByRole('button', { name: 'Mit Google anmelden' }).click()
-  await page.getByRole('heading', { name: 'Testküche' }).waitFor()
+  await page.getByRole('link', { name: 'Testküche', exact: true }).waitFor()
   await page.waitForFunction(() => Boolean(navigator.serviceWorker.controller))
 }
 
@@ -157,25 +175,133 @@ try {
   })
   assert.equal(build.status, 0)
   browser = await chromium.launch({ executablePath: process.env.PLAYWRIGHT_CHROMIUM_EXECUTABLE_PATH || undefined })
+  const startup = await browser.newContext({ colorScheme: 'dark', serviceWorkers: 'block' })
+  const startupPage = await startup.newPage()
+  await startupPage.route('**/assets/*.js', route => route.abort())
+  await startupPage.goto(origin)
+  assert.equal(await startupPage.locator('html').getAttribute('data-theme'), 'dark', 'Theme applies even before React loads')
+  assert.equal(await startupPage.locator('meta[name="theme-color"]').getAttribute('content'), '#191714')
+  assert.equal(await startupPage.evaluate(() => getComputedStyle(document.documentElement).colorScheme), 'dark')
+  await startup.close()
   const mobile = await browser.newContext(devices['iPhone 13'])
   const desktop = await browser.newContext()
   await mobile.grantPermissions(['clipboard-read', 'clipboard-write'])
   const first = await mobile.newPage()
   const second = await desktop.newPage()
   await Promise.all([login(first, 'alex@example.test'), login(second, 'sam@example.test')])
-  assert.equal(await first.locator('header .app-brand').textContent(), 'Espresso Diary')
-  assert.equal(await first.locator('.page-title').textContent(), 'Testküche')
+  assert.equal(await first.locator('header .app-brand').textContent(), room.name)
+  assert.equal(await first.locator('.page-title').count(), 0)
+  await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Bohnen', exact: true }).click()
+  await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Verlauf', exact: true }).click()
+  await first.goBack()
+  await first.getByRole('heading', { name: 'Bohnen', exact: true }).waitFor()
+  await first.reload()
+  await first.getByRole('heading', { name: 'Bohnen', exact: true }).waitFor()
+  await first.goBack()
+  await first.locator('.brew-hero').waitFor()
+  await first.goForward()
+  await first.getByRole('heading', { name: 'Bohnen', exact: true }).waitFor()
+  await first.goBack()
+  await first.locator('.brew-hero').waitFor()
+  await first.locator('.quick-brew').click()
+  assert.equal(await first.locator('.step-track button').count(), 4)
+  assert.equal(await first.getByRole('button', { name: /Schritt .*: Profil/ }).count(), 0)
+  await first.getByRole('button', { name: 'Schritt 2: Mahlgrad', exact: true }).click()
+  await first.getByRole('slider', { name: 'Mahlgrad', exact: true }).tap()
+  await first.getByRole('heading', { name: 'Kaffeemenge – 3/4', exact: true }).waitFor()
+  assert.equal(await first.locator('.basket-picker').count(), 0, 'Single basket selection is hidden')
+  await first.getByRole('slider', { name: 'Dosis', exact: true }).tap()
+  await first.getByRole('heading', { name: 'Ergebnis – 4/4', exact: true }).waitFor()
+  await first.screenshot({ path: 'tests/mobile-results.png', animations: 'disabled' })
+  await first.getByRole('button', { name: 'Schritt 3: Kaffeemenge', exact: true }).click()
+  await first.getByRole('slider', { name: 'Dosis', exact: true }).focus()
+  await first.keyboard.press('ArrowRight')
+  const draftDose = await first.getByRole('slider', { name: 'Dosis', exact: true }).getAttribute('aria-valuenow')
+  await first.reload()
+  await first.getByRole('heading', { name: 'Kaffeemenge – 3/4', exact: true }).waitFor()
+  assert.equal(await first.getByRole('slider', { name: 'Dosis', exact: true }).getAttribute('aria-valuenow'), draftDose)
+  await first.getByRole('button', { name: 'Weiter →', exact: true }).click()
+  assert.equal(await first.locator('#shot-title').textContent(), 'Ergebnis – 4/4')
+  await first.goBack()
+  await first.getByRole('heading', { name: 'Kaffeemenge – 3/4', exact: true }).waitFor()
+  await first.goForward()
+  await first.getByRole('heading', { name: 'Ergebnis – 4/4', exact: true }).waitFor()
+  await first.getByRole('button', { name: 'Zurück', exact: true }).click()
+  await first.getByRole('heading', { name: 'Kaffeemenge – 3/4', exact: true }).waitFor()
+  assert.equal(await first.locator('#shot-title').textContent(), 'Kaffeemenge – 3/4')
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
+  profiles.push({ id: 'standard-profile', room_id: room.id, name: 'Standard', archived: false, ever_used: true, sort_order: 0 })
+  await first.reload()
+  await first.locator('.quick-brew').waitFor()
+  await first.getByRole('button', { name: 'Menü', exact: true }).click()
+  await first.locator('.menu-about > summary').click()
+  assert.equal(await first.locator('.menu-about > p').isVisible(), true)
+  await Promise.all([
+    first.waitForEvent('load'),
+    first.getByRole('button', { name: 'Neu laden', exact: true }).click(),
+  ])
+  await first.getByRole('link', { name: 'Testküche', exact: true }).waitFor()
+  await first.emulateMedia({ reducedMotion: 'reduce' })
+  await first.locator('.quick-brew').click()
+  for (const height of [500, 740, 844, 915]) {
+    await first.setViewportSize({ width: 412, height })
+    let grindPosition
+    for (let stage = 0; stage < 5; stage++) {
+      await first.locator('.step-track button').nth(stage).click()
+      const layout = await first.evaluate(() => ({
+        gap: innerHeight - document.querySelector('.shot-form').getBoundingClientRect().bottom,
+        overflow: document.documentElement.scrollHeight - innerHeight,
+        actionsBottom: document.querySelector('.wizard-actions').getBoundingClientRect().bottom,
+      }))
+      assert.ok(layout.gap >= 0 && layout.gap <= 16, `Step ${stage} at ${height}: unused bottom gap ${layout.gap}`)
+      assert.ok(layout.overflow <= 1, `Step ${stage} at ${height}: document overflow ${layout.overflow}`)
+      assert.ok(layout.actionsBottom <= height, 'Wizard actions stay in view')
+      if (stage === 1) {
+        grindPosition = await first.getByRole('slider', { name: 'Mahlgrad', exact: true }).boundingBox()
+        assert.equal(await first.locator('.wizard-fields select').count(), 0, 'Single grinder needs no selector')
+        const positions = await first.locator('.dial-adjuster').evaluate(el => {
+          const row = el.getBoundingClientRect(), wheel = el.querySelector('.dial').getBoundingClientRect()
+          const buttons = [...el.querySelectorAll(':scope > button')].map(button => button.getBoundingClientRect())
+          return { left: buttons[0].x + buttons[0].width / 2, right: buttons[1].x + buttons[1].width / 2, expectedLeft: (row.left + wheel.left) / 2, expectedRight: (row.right + wheel.right) / 2 }
+        })
+        assert.ok(Math.abs(positions.left - positions.expectedLeft) < 1 && Math.abs(positions.right - positions.expectedRight) < 1, 'Buttons centered in the space beside the wheel')
+      }
+      if (stage === 2) {
+        const dosePosition = await first.getByRole('slider', { name: 'Dosis', exact: true }).boundingBox()
+        for (const dimension of ['x', 'y', 'width', 'height']) assert.ok(Math.abs(grindPosition[dimension] - dosePosition[dimension]) <= 1, `Matching wheel ${dimension} at ${height}`)
+      }
+      if (((stage === 1 || stage === 2) && height >= 740) || stage === 4) {
+        const field = await first.locator('.shot-form > form > .wizard-fields').evaluate(el => ({ height: el.clientHeight, scroll: el.scrollHeight, dial: el.querySelector('.dial')?.getBoundingClientRect().height, children: [...el.children].map(child => [child.className, child.getBoundingClientRect().height]) }))
+        assert.ok(field.scroll <= field.height + 1, `Dial and controls fit: ${stage}/${height} ${JSON.stringify(field)}`)
+      }
+    }
+  }
+  await first.setViewportSize({ width: 390, height: 844 })
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
   for (const pageName of ['Verlauf', 'Bohnen', 'Einstellungen', 'Start']) {
     await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: pageName, exact: true }).click()
+    const fixedTitle = first.locator(pageName === 'Start' ? 'header .app-brand' : '.page-title')
+    const titleTop = await fixedTitle.evaluate(el => el.getBoundingClientRect().top)
+    await first.locator('.room-content').evaluate(el => { el.scrollTop = 10000 })
+    if (pageName === 'Bohnen') assert.equal(await first.locator('.room-content').evaluate(el => el.scrollTop), 0, 'Short bean list has no empty scroll area')
+    assert.equal(await fixedTitle.evaluate(el => el.getBoundingClientRect().top), titleTop, 'Page title stays fixed')
+    assert.equal(await first.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1), true, 'No document scroll on ' + pageName)
+    if (pageName === 'Verlauf') {
+      assert.equal(await first.getByRole('button', { name: /Neuer Bezug/ }).count(), 0)
+      continue
+    }
     await first.locator('.quick-brew').click()
     await first.locator('.shot-form').waitFor()
     assert.equal(await first.locator('.quick-brew').count(), 0)
-    await first.getByRole('button', { name: 'Schließen', exact: true }).click()
+    await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
   }
 
   await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
   await first.getByRole('button', { name: 'Dunkel', exact: true }).click()
   assert.equal(await first.locator('html').getAttribute('data-theme'), 'dark')
+  assert.equal(await first.locator('meta[name="color-scheme"]').getAttribute('content'), 'dark')
+  assert.equal(await first.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(25, 23, 20)')
+  assert.equal(await first.locator('.bottom-nav').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(25, 23, 20)')
   await first.reload()
   assert.equal(await first.locator('html').getAttribute('data-theme'), 'dark')
   await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
@@ -189,15 +315,19 @@ try {
   await first.waitForFunction(() => document.documentElement.dataset.theme === 'light')
   assert.equal(await first.locator('.appearance').evaluate(el => getComputedStyle(el).animationName), 'none')
   await first.emulateMedia({ reducedMotion: 'no-preference' })
+  assert.equal(await first.getByLabel('Dosis · pro Umdrehung').inputValue(), '20')
+  assert.equal(await first.getByLabel('Output · pro Umdrehung').inputValue(), '20')
+  // Keep the existing fine-grained dial regression below at its original scale.
+  for (const label of ['Dosis', 'Output', 'Laufzeit', 'Solltemperatur']) await first.getByLabel(label + ' · pro Umdrehung').selectOption('6')
   await first.getByRole('button', { name: 'Start', exact: true }).click()
 
 
   await mobile.setOffline(true)
   await first.reload()
-  await first.getByRole('heading', { name: 'Testküche' }).waitFor()
+  await first.getByRole('link', { name: 'Testküche', exact: true }).waitFor()
   await first.getByRole('button', { name: /Neuer Bezug/ }).first().click()
   await first.getByRole('button', { name: /Casa Blend/ }).click()
-  await first.getByRole('heading', { name: 'Dein Mahlgrad', exact: true }).waitFor()
+  await first.getByRole('heading', { name: 'Mahlgrad – 2/5', exact: true }).waitFor()
   for (const height of [844, 740]) {
     await first.setViewportSize({ width: 390, height })
     assert.equal(await first.evaluate(() => document.documentElement.scrollHeight <= innerHeight + 1), true, 'Mahlgrad should fit viewport at ' + height)
@@ -296,7 +426,7 @@ try {
   }
   await first.screenshot({ path: 'tests/mobile-dose-compact.png' })
   await first.setViewportSize({ width: 390, height: 844 })
-  await first.getByRole('button', { name: 'Schließen' }).click()
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
   await first.screenshot({ path: 'tests/mobile-home.png', fullPage: true, animations: 'disabled' })
   await first.getByRole('button', { name: 'Bohnen', exact: true }).click()
   assert.equal(await first.locator('.page-title').textContent(), 'Bohnen')
@@ -342,21 +472,31 @@ try {
   await first.setViewportSize({width:390,height:844})
   assert.equal(await first.locator('.bean-scroll-list').evaluate(el => el.scrollHeight > el.clientHeight), true)
   await first.getByRole('button', { name: /India/ }).click()
-  await first.getByRole('heading', { name: 'Dein Mahlgrad', exact: true }).waitFor()
+  await first.getByRole('heading', { name: 'Mahlgrad – 2/5', exact: true }).waitFor()
   await first.getByRole('button', { name: 'Zurück', exact: true }).click()
   assert.equal(await first.getByRole('button', { name: /India/ }).getAttribute('aria-pressed'), 'true')
   await first.getByRole('button', { name: /Colombia/ }).click()
-  await first.getByRole('heading', { name: 'Dein Mahlgrad', exact: true }).waitFor()
+  await first.getByRole('heading', { name: 'Mahlgrad – 2/5', exact: true }).waitFor()
   await first.getByRole('button', { name: 'Zurück', exact: true }).click()
   assert.equal(await first.getByRole('button', { name: /Colombia/ }).getAttribute('aria-pressed'), 'true')
   assert.ok((await first.locator('.recent-beans .bean-picture').first().boundingBox()).width > 95)
   await first.screenshot({ path: 'tests/mobile-bean-selection.png', fullPage: true, animations: 'disabled' })
+  assert.equal(await first.locator('.bean-scroll-list .bean-picture').evaluateAll(elements => elements.every(el => {
+    const picture = el.getBoundingClientRect()
+    const content = el.firstElementChild.getBoundingClientRect()
+    return Math.abs(picture.height - picture.width * 1.25) <= 2 && content.bottom <= picture.bottom + 1
+  })), true, 'Bean pictures preserve their ratio and keep placeholders inside their cards')
+  const cardLayout = await first.locator('.bean-scroll-list .bean-picture-card').evaluateAll(elements => elements.map(el => {
+    const card = el.getBoundingClientRect(), picture = el.querySelector('.bean-picture').getBoundingClientRect()
+    return { top: card.top, bottom: card.bottom, pictureBottom: picture.bottom }
+  }))
+  assert.ok(cardLayout.every((card, index) => card.pictureBottom <= card.bottom && (index < 3 || card.top >= cardLayout[index - 3].bottom)), 'Bean grid rows must not overlap: ' + JSON.stringify(cardLayout))
   await first.emulateMedia({ colorScheme: 'dark' })
   await first.waitForFunction(() => document.documentElement.dataset.theme === 'dark')
   await first.screenshot({ path: 'tests/mobile-dark-beans.png', fullPage: true, animations: 'disabled' })
   await first.emulateMedia({ colorScheme: 'light' })
   assert.equal(await first.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true)
-  await first.getByRole('button', { name: 'Schließen' }).click()
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
   await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
   assert.equal(await first.locator('.page-title').textContent(), 'Einstellungen')
   assert.equal(await first.getByRole('heading', { name: 'Testküche', exact: true }).count(), 0)
@@ -392,7 +532,7 @@ try {
   for (let i = 0; i < 3; i++) shots.push({ ...shots[0], id: 'basket-shot-' + i, basket_id: baskets[i + 1].id, brewed_at: new Date(Date.now() + (i + 10) * 1000).toISOString() })
   await first.reload()
   await first.getByRole('button', { name: /Neuer Bezug/ }).first().click()
-  await first.getByRole('button', { name: 'Schritt 3: Wie viel Kaffee?' }).click()
+  await first.getByRole('button', { name: 'Schritt 3: Kaffeemenge' }).click()
   const recentBaskets = first.getByRole('region', { name: 'Zuletzt verwendete Siebe', exact: true })
   await recentBaskets.getByRole('button').nth(2).waitFor()
   assert.equal(await recentBaskets.getByRole('button').count(), 3)
@@ -414,7 +554,155 @@ try {
   await first.getByRole('button', { name: 'Profil hinzufügen', exact: true }).click()
   await first.getByRole('button', { name: /Spontaner Espresso/ }).waitFor()
   assert.equal(await first.getByRole('button', { name: /Spontaner Espresso/ }).getAttribute('aria-pressed'), 'true')
-  assert.equal(profiles[0].name, 'Spontaner Espresso')
+  assert.equal(profiles.at(-1).name, 'Spontaner Espresso')
+  await first.locator('.profile-options').getByRole('button', { name: /Spontaner Espresso/ }).click()
+  await first.getByRole('heading', { name: 'Ergebnis – 5/5', exact: true }).waitFor()
+  await first.getByRole('button', { name: 'Zurück', exact: true }).click()
+  await first.getByRole('heading', { name: 'Profil – 4/5', exact: true }).waitFor()
+  assert.equal(await first.locator('.profile-options').getByRole('button', { name: /Spontaner Espresso/ }).getAttribute('aria-pressed'), 'true')
+  await first.locator('.profile-options').getByRole('button', { name: /Ohne Profil/ }).click()
+  assert.equal(await first.locator('.shot-form').getAttribute('data-step'), '4')
+  await first.getByRole('button', { name: 'Zurück', exact: true }).click()
+  assert.equal(await first.locator('.profile-options').getByRole('button', { name: /Ohne Profil/ }).getAttribute('aria-pressed'), 'true')
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
+  await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
+  const profileGroup = first.locator('.settings-group').filter({ has: first.locator('summary strong', { hasText: 'Bezugsprofile' }) })
+  await profileGroup.locator(':scope > summary').click()
+  assert.equal(await profileGroup.getByRole('button', { name: 'Standard löschen', exact: true }).count(), 0)
+  const dragHandle = profileGroup.getByRole('button', { name: 'Spontaner Espresso verschieben', exact: true })
+  await dragHandle.scrollIntoViewIfNeeded()
+  const dragFrom = await dragHandle.boundingBox()
+  const dragTo = await profileGroup.getByRole('button', { name: 'Standard verschieben', exact: true }).boundingBox()
+  const profileTouch = await mobile.newCDPSession(first)
+  const dragX = dragFrom.x + dragFrom.width / 2
+  const dragStartY = dragFrom.y + dragFrom.height / 2
+  const dragEndY = dragTo.y + dragTo.height / 2
+  await profileTouch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x: dragX, y: dragStartY }] })
+  for (let step = 1; step <= 8; step++) await profileTouch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: dragX, y: dragStartY + (dragEndY - dragStartY) * step / 8 }] })
+  await profileTouch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  await first.waitForFunction(() => document.querySelector('.profile-admin-list > li > span')?.textContent === 'Spontaner Espresso')
+  await first.reload()
+  await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
+  await profileGroup.locator(':scope > summary').click()
+  assert.equal(await profileGroup.locator('.profile-admin-list > li > span').first().textContent(), 'Spontaner Espresso')
+  const spontaneous = profileGroup.locator('li').filter({ has: first.locator('span', { hasText: /^Spontaner Espresso$/ }) })
+  await spontaneous.getByRole('button', { name: 'Archivieren', exact: true }).click()
+  await profileGroup.locator('.archived-profiles').waitFor()
+  assert.equal(await profileGroup.getByRole('button', { name: 'Aktivieren', exact: true }).isVisible(), false)
+  await profileGroup.locator('.archived-profiles > summary').click()
+  await profileGroup.getByRole('button', { name: 'Aktivieren', exact: true }).click()
+  await profileGroup.getByRole('button', { name: 'Spontaner Espresso löschen', exact: true }).click()
+  await profileGroup.getByRole('button', { name: 'Spontaner Espresso löschen', exact: true }).waitFor({ state: 'detached' })
+  assert.equal(profiles.some(p => p.name === 'Spontaner Espresso'), false)
+  for (const [label, revolution] of [['Dosis', '20'], ['Output', '20'], ['Laufzeit', '60'], ['Solltemperatur', '10']]) {
+    await first.getByLabel(label + ' · pro Umdrehung').selectOption(revolution)
+  }
+  await first.reload()
+  await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
+  assert.equal(await first.getByLabel('Dosis · pro Umdrehung').inputValue(), '20')
+  await first.screenshot({ path: 'tests/mobile-dial-settings.png', fullPage: true, animations: 'disabled' })
+  await first.getByRole('button', { name: /Neuer Bezug/ }).first().click()
+  await first.getByRole('button', { name: 'Schritt 3: Kaffeemenge' }).click()
+  await first.locator('.precise > summary').click()
+  await first.getByLabel('Dosis direkt', { exact: true }).fill('18')
+  await first.getByRole('button', { name: 'Dosis erhöhen' }).click()
+  assert.equal(await first.getByRole('slider', { name: 'Dosis', exact: true }).getAttribute('aria-valuenow'), '18.1')
+  await first.getByLabel('Dosis direkt', { exact: true }).fill('18.2')
+  assert.equal(await first.getByRole('slider', { name: 'Dosis', exact: true }).getAttribute('aria-valuenow'), '18.2')
+  await first.getByRole('button', { name: 'Schritt 5: Ergebnis' }).click()
+  async function turn(label, degrees) {
+    const dial = first.getByRole('slider', { name: label, exact: true })
+    await dial.scrollIntoViewIfNeeded()
+    const box = await dial.boundingBox()
+    const x = box.x + box.width / 2, y = box.y + box.height / 2, radius = box.width * .44
+    await first.mouse.move(x, y - radius)
+    await first.mouse.down()
+    for (let step = 1; step <= 60; step++) {
+      const angle = (-90 + degrees * step / 60) * Math.PI / 180
+      await first.mouse.move(x + radius * Math.cos(angle), y + radius * Math.sin(angle))
+    }
+    await first.mouse.up()
+  }
+  for (const [label, initial, expected] of [['Output', '40', '20'], ['Laufzeit', '90', '30']]) {
+    const control = first.locator('.dial-control').filter({ has: first.getByRole('slider', { name: label, exact: true }) })
+    await control.locator('.precise > summary').click()
+    await first.getByLabel(label + ' direkt', { exact: true }).fill(initial)
+    await turn(label, -360)
+    assert.equal(await first.getByRole('slider', { name: label, exact: true }).getAttribute('aria-valuenow'), expected)
+  }
+  await first.getByText('Weitere Angaben & Import', { exact: true }).click()
+  await turn('Solltemperatur', 360)
+  assert.equal(await first.getByRole('slider', { name: 'Solltemperatur' }).getAttribute('aria-valuenow'), '103')
+  await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
+  await first.getByRole('button', { name: 'Verlauf', exact: true }).click()
+  const entries = first.locator('.history-entry')
+  const entryCount = await entries.count()
+  await first.getByRole('searchbox', { name: 'Bezüge durchsuchen' }).fill('keine-passende-bohne-xyz')
+  assert.equal(await entries.count(), 0)
+  await first.getByRole('button', { name: 'Filter zurücksetzen', exact: true }).click()
+  assert.equal(await entries.count(), entryCount)
+  await first.getByRole('button', { name: 'Filter', exact: true }).click()
+  await first.locator('.history-filters').getByLabel('Person', { exact: true }).selectOption(accounts['alex@example.test'].id)
+  assert.ok(await entries.count() > 0)
+  await first.getByRole('button', { name: 'Filter zurücksetzen', exact: true }).click()
+  await first.getByRole('button', { name: 'Filter', exact: true }).click()
+  const touch = await mobile.newCDPSession(first)
+  async function swipe(distance) {
+    const copy = entries.first().locator('.entry-copy')
+    await copy.scrollIntoViewIfNeeded()
+    const box = await copy.boundingBox()
+    const x = box.x + box.width - 5, y = box.y + 5
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
+    for (let step = 1; step <= 12; step++) {
+      await touch.send('Input.dispatchTouchEvent', { type: 'touchMove', touchPoints: [{ x: x + distance * step / 12, y }] })
+    }
+    await touch.send('Input.dispatchTouchEvent', { type: 'touchEnd', touchPoints: [] })
+  }
+  await swipe(-45)
+  assert.equal(await entries.count(), entryCount, 'Short swipe does not delete')
+  assert.equal(await entries.first().locator('details').getAttribute('open'), null, 'Swipe does not toggle details')
+  await swipe(-120)
+  await first.getByRole('button', { name: 'Rückgängig', exact: true }).waitFor()
+  assert.equal(await entries.count(), entryCount - 1)
+  assert.equal(shots.filter(shot => shot.deleted_at).length, 0, 'Deletion is deferred during undo window')
+  await first.getByRole('button', { name: 'Einstellungen', exact: true }).click()
+  await first.getByRole('button', { name: 'Rückgängig', exact: true }).click()
+  await first.getByRole('button', { name: 'Verlauf', exact: true }).click()
+  assert.equal(await entries.count(), entryCount)
+  await first.screenshot({ path: 'tests/mobile-swipe-history.png', fullPage: true, animations: 'disabled' })
+  assert.equal(await first.locator('.swipe-delete-hint').first().isVisible(), false, 'Delete background stays hidden when not swiping')
+  rejectDeletion = true
+  await swipe(-120)
+  await first.getByText('Der Bezug konnte nicht gelöscht werden. Prüfe den aktuellen Stand und versuche es erneut.', { exact: true }).waitFor({ timeout: 15000 })
+  assert.equal(await entries.count(), entryCount, 'Failed deletion restores the entry')
+  rejectDeletion = false
+  await swipe(-120)
+  await first.locator('.undo-deletion').waitFor({ state: 'hidden', timeout: 15000 })
+  assert.equal(shots.filter(shot => shot.deleted_at).length, 1)
+  await first.reload()
+  await first.getByRole('button', { name: 'Verlauf', exact: true }).click()
+  assert.equal(await entries.count(), entryCount - 1, 'Deletion persists after reload')
+  await second.reload()
+  await second.locator('.history-entry').first().waitFor()
+  assert.equal(await second.locator('.swipe-entry[data-enabled]').count(), 0, 'Other authors cannot be swiped away')
+  console.log('Early dark theme, persistent dial revolutions, swipe cancellation, undo, deletion failure and persistence passed.')
+  for (const [width, height] of [[768, 1024], [1024, 768], [1440, 900]]) {
+    await first.setViewportSize({ width, height })
+    await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Start', exact: true }).click()
+    const rail = await first.locator('.bottom-nav').boundingBox()
+    assert.ok(rail.x < 1 && rail.width <= 96 && rail.height > 500, 'Expanded layout uses a navigation rail')
+    assert.equal(await first.evaluate(() => document.documentElement.scrollWidth <= innerWidth), true, 'No horizontal overflow on expanded screens')
+    await first.screenshot({ path: `tests/expanded-home-${width}.png`, animations: 'disabled' })
+    await first.locator('.quick-brew').click()
+    await first.getByRole('button', { name: /Schritt .*: Ergebnis/ }).click()
+    const resultLayout = await first.locator('.wizard-fields').evaluate(el => ({ height: el.clientHeight, scroll: el.scrollHeight }))
+    assert.ok(resultLayout.scroll <= resultLayout.height + 1, 'Expanded result fits without scrolling')
+    const wheels = await first.locator('.result-dials .dial').all()
+    const left = await wheels[0].boundingBox(), right = await wheels[1].boundingBox()
+    assert.ok(right.x > left.x + left.width && Math.abs(left.y - right.y) < 1, 'Expanded result wheels sit side by side')
+    await first.screenshot({ path: `tests/expanded-results-${width}.png`, animations: 'disabled' })
+    await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click()
+  }
   console.log('PWA offline reload, queued shot, two-account visibility and duplicate retry passed.')
 } finally {
   await browser?.close()

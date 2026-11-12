@@ -1,9 +1,10 @@
-import { useEffect, useState, type FormEvent, type ReactNode } from 'react'
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from 'react'
 import { api } from './data'
 import { decimal, DiaryError, formatNumber, grinderName, validateRoomPassword, type Basket, type Grinder, type ImageResult, type RoomData } from './model'
 import { errorText, Notice, Photo } from './ui'
 import { PhotoPicker } from './PhotoPicker'
 import { usePhotoPaste } from './usePhotoPaste'
+import { TrashIcon } from './Icons'
 
 function SettingNumber({ name, label, initial, min, max, step }: { name: string; label: string; initial: number; min: number; max: number; step: number }) {
   const [value, setValue] = useState(initial)
@@ -204,6 +205,10 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
   const [profileName, setProfileName] = useState('')
   const [busy, setBusy] = useState(false)
   const { room } = data
+  const drag = useRef<{ pointer: number; source: number; target: number; ids: string[] } | null>(null)
+  const [dragPreview, setDragPreview] = useState<{ source: string; target: string } | null>(null)
+  const activeProfiles = data.profiles.filter(profile => !profile.archived)
+  const archivedProfiles = data.profiles.filter(profile => profile.archived)
   const inviteLink = (id: string) => new URL('/?einladung=' + id, location.origin).href
 
   async function change(request: () => PromiseLike<{ error: unknown }>) {
@@ -216,6 +221,69 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
       return true
     } catch (reason) { setError(errorText(reason)); return false }
     finally { setBusy(false) }
+  }
+
+  function moveProfile(index: number, direction: number) {
+    const ids = activeProfiles.map(profile => profile.id)
+    const next = index + direction
+    if (next < 0 || next >= ids.length) return
+    ;[ids[index], ids[next]] = [ids[next], ids[index]]
+    void change(() => api.rpc('set_profile_order', { target_room: room.id, profile_ids: ids }))
+  }
+
+  function dragProfile(event: PointerEvent<HTMLButtonElement>) {
+    const current = drag.current
+    if (!current || current.pointer !== event.pointerId) return
+    const rows = [...event.currentTarget.closest('ul')!.querySelectorAll<HTMLLIElement>(':scope > li')]
+    let closest = current.target
+    let distance = Infinity
+    rows.forEach((row, index) => {
+      const rect = row.getBoundingClientRect()
+      const delta = Math.abs(event.clientY - (rect.top + rect.height / 2))
+      if (delta < distance) { distance = delta; closest = index }
+    })
+    current.target = closest
+    setDragPreview({ source: current.ids[current.source], target: current.ids[closest] })
+    const scroller = event.currentTarget.closest('.room-content')
+    if (scroller) {
+      const rect = scroller.getBoundingClientRect()
+      if (event.clientY < rect.top + 50) scroller.scrollBy(0, -18)
+      else if (event.clientY > rect.bottom - 50) scroller.scrollBy(0, 18)
+    }
+  }
+
+  function finishDrag(event: PointerEvent<HTMLButtonElement>, cancel = false) {
+    const current = drag.current
+    if (!current || current.pointer !== event.pointerId) return
+    drag.current = null
+    setDragPreview(null)
+    if (event.currentTarget.hasPointerCapture(event.pointerId)) event.currentTarget.releasePointerCapture(event.pointerId)
+    if (cancel || current.source === current.target) return
+    const ids = [...current.ids]
+    const [id] = ids.splice(current.source, 1)
+    ids.splice(current.target, 0, id)
+    void change(() => api.rpc('set_profile_order', { target_room: room.id, profile_ids: ids }))
+  }
+
+  function profileList(items: RoomData['profiles']) {
+    return <ul className="admin-list profile-admin-list">{items.map((item, index) => <li key={item.id} className={dragPreview?.target === item.id ? 'profile-drop-target' : undefined} data-dragging={dragPreview?.source === item.id || undefined}>
+      {!item.archived && <button type="button" className="quiet profile-drag-handle" aria-label={`${item.name} verschieben`} title="Ziehen zum Sortieren; mit Tastatur: Pfeil hoch/runter" disabled={busy || activeProfiles.length < 2}
+        onPointerDown={event => {
+          if (event.button !== 0 || !event.isPrimary) return
+          event.currentTarget.setPointerCapture(event.pointerId)
+          drag.current = { pointer: event.pointerId, source: index, target: index, ids: activeProfiles.map(profile => profile.id) }
+          setDragPreview({ source: item.id, target: item.id })
+        }} onPointerMove={dragProfile} onPointerUp={event => finishDrag(event)} onPointerCancel={event => finishDrag(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) finishDrag(event, true) }}
+        onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); moveProfile(index, event.key === 'ArrowUp' ? -1 : 1) } }}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">{[6, 12, 18].flatMap(y => [8, 16].map(x => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.5" />))}</svg></button>}
+      <span>{item.name}</span>
+      <div className="actions profile-actions">
+        {item.ever_used === false && !data.shots.some(shot => shot.profile === item.name) && <button type="button" className="quiet profile-icon" aria-label={`${item.name} löschen`} title="Unbenutztes Profil löschen" disabled={busy} onClick={() => void change(() => api.rpc('delete_unused_profile', { profile_id: item.id }))}><TrashIcon /></button>}
+        <button type="button" className="quiet" disabled={busy} onClick={() => void change(() =>
+          api.from('profiles').update({ archived: !item.archived }).eq('id', item.id))}>
+          {item.archived ? 'Aktivieren' : 'Archivieren'}
+        </button>
+      </div>
+    </li>)}</ul>
   }
 
   return <section className="admin settings-hub" aria-label="Raumeinstellungen">
@@ -252,13 +320,8 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
         if (await change(() => api.from('profiles').insert({ room_id: room.id, name: profileName.trim() }))) setProfileName('')
       }}><label>Profilname<input value={profileName} onChange={e => setProfileName(e.target.value)} required maxLength={100} /></label>
         <button disabled={busy}>Hinzufügen</button></form>
-      <ul className="admin-list">{data.profiles.map(item => <li key={item.id}>
-        <span>{item.name}{item.archived && <small>Archiviert</small>}</span>
-        <button type="button" className="quiet" disabled={busy} onClick={() => void change(() =>
-          api.from('profiles').update({ archived: !item.archived }).eq('id', item.id))}>
-          {item.archived ? 'Aktivieren' : 'Archivieren'}
-        </button>
-      </li>)}</ul>
+      {profileList(activeProfiles)}
+      {archivedProfiles.length > 0 && <details className="archived-profiles"><summary>Archivierte Profile ({archivedProfiles.length})</summary>{profileList(archivedProfiles)}</details>}
     </SettingsGroup>
     <SettingsGroup title="Import" subtitle={room.gaggimate ? 'GaggiMate ist aktiviert' : 'GaggiMate verbinden'} icon="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5">
     <label className="check settings-switch"><input type="checkbox" checked={room.gaggimate} disabled={busy} onChange={e => {

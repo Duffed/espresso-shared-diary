@@ -46,8 +46,10 @@ export default defineConfig(({ mode }) => ({
       lang: 'de',
       start_url: '/',
       display: 'standalone',
-      theme_color: '#faf5ee',
-      background_color: '#faf5ee',
+      // Omit the installed navigation-bar color, including vite-plugin-pwa's default.
+      // Android/Bare can then use its system theme instead of a fixed app color.
+      theme_color: undefined,
+      background_color: '#191714',
       icons: [192, 512].map(size => ({
         src: '/espresso-diary-' + size + '.png',
         sizes: size + 'x' + size,

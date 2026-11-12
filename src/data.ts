@@ -66,7 +66,7 @@ export async function loadRoom(user: string, roomId: string): Promise<RoomData> 
     api.from('invites').select('*').eq('room_id', roomId).order('expires_at', { ascending: false }).returns<Invite[]>(),
     api.from('grinders').select('*').eq('room_id', roomId).order('brand').returns<Grinder[]>(),
     api.from('baskets').select('*').eq('room_id', roomId).order('name').returns<Basket[]>(),
-    api.from('profiles').select('*').eq('room_id', roomId).order('name').returns<Profile[]>(),
+    api.from('profiles').select('*').eq('room_id', roomId).order('sort_order').order('name').order('id').returns<Profile[]>(),
     api.from('beans').select('*').eq('room_id', roomId).order('name').returns<Bean[]>(),
   ])
   for (const result of [members, invites, grinders, baskets, profiles]) {

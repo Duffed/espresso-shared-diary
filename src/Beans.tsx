@@ -1,4 +1,4 @@
-import { BeanIcon } from './Icons'
+import { BeanIcon, GridIcon, ListIcon } from './Icons'
 import { useState } from 'react'
 import { api } from './data'
 import { DiaryError, type Bean, type RoomData } from './model'
@@ -64,12 +64,19 @@ function BeanForm({ bean, room, onSaved, onClose }: {
 
 export function Beans({ data, refresh, onSelect, hideHeading = false }: { data: RoomData; refresh: () => Promise<void>; onSelect?: (bean: Bean) => void; hideHeading?: boolean }) {
   const [editing, setEditing] = useState<Bean | 'new'>()
+  const [view, setView] = useState<'list' | 'grid'>(() => {
+    try { return localStorage.getItem('espresso-diary-bean-view') === 'grid' ? 'grid' : 'list' } catch { return 'list' }
+  })
+  function changeView(next: 'list' | 'grid') {
+    setView(next)
+    try { localStorage.setItem('espresso-diary-bean-view', next) } catch { /* Keep the selection for this session. */ }
+  }
   return <section className="bean-library">
-    <div className={hideHeading ? 'section-heading bean-library-actions' : 'section-heading'}>{!hideHeading && <h2>Deine Bohnen</h2>}<button disabled={!navigator.onLine || Boolean(editing)} onClick={() => setEditing('new')}>＋ Bohne</button></div>
+    <div className={hideHeading ? 'section-heading bean-library-actions' : 'section-heading'}>{!hideHeading && <h2>Deine Bohnen</h2>}{!onSelect && <div className="bean-view-toggle" role="group" aria-label="Bohnenansicht"><button aria-label="Listenansicht" title="Listenansicht" aria-pressed={view === 'list'} onClick={() => changeView('list')}><ListIcon /></button><button aria-label="Rasteransicht" title="Rasteransicht" aria-pressed={view === 'grid'} onClick={() => changeView('grid')}><GridIcon /></button></div>}<button disabled={!navigator.onLine || Boolean(editing)} onClick={() => setEditing('new')}>＋ Bohne</button></div>
     {editing && <BeanForm key={editing === 'new' ? 'new' : editing.id} bean={editing === 'new' ? undefined : editing} room={data.room.id}
       onClose={() => setEditing(undefined)} onSaved={async bean => { await refresh(); setEditing(undefined); onSelect?.(bean) }} />}
     {!data.beans?.length && !editing && <p className="empty">Dein nächster Lieblingskaffee beginnt hier.<br />Speichere deine erste Bohne.</p>}
-    {!onSelect && <div className="bean-list">{data.beans?.map(bean => <div className="bean-card" key={bean.id}><BeanPhoto bean={bean} />
+    {!onSelect && <div className={`bean-list${view === 'grid' ? ' bean-library-grid' : ''}`}>{data.beans?.map(bean => <div className="bean-card" key={bean.id}><BeanPhoto bean={bean} />
       <span><strong>{bean.name}</strong><small>{bean.roaster || 'Kaffeesorte'}</small></span><button className="quiet" disabled={!navigator.onLine || Boolean(editing)} onClick={() => setEditing(bean)}>Bearbeiten</button></div>)}</div>}
   </section>
 }
