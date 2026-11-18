@@ -297,6 +297,47 @@ try {
   const first = await mobile.newPage()
   const second = await desktop.newPage()
   await Promise.all([login(first, 'alex@example.test'), login(second, 'sam@example.test')])
+  const navigationContext = await browser.newContext(devices['iPhone 13'])
+  const navigationPage = await navigationContext.newPage()
+  await login(navigationPage, 'alex@example.test')
+  await navigationPage.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Einstellungen', exact: true }).click()
+  await openPersonalSettings(navigationPage)
+  for (const name of ['Klassisch', 'Glas', 'Retro 98']) assert.equal(await navigationPage.getByRole('button', { name, exact: true }).count(), 1)
+  for (const [name, design] of [['Klassisch', 'classic'], ['Glas', 'glass'], ['Retro 98', 'orbit']]) {
+    await navigationPage.getByRole('button', { name, exact: true }).click()
+    assert.equal(await navigationPage.locator('html').getAttribute('data-design'), design)
+    await navigationPage.locator('#root').evaluate(el => { el.scrollTop = 0 })
+    await navigationPage.waitForFunction(() => document.querySelector('.top').getAttribute('data-scroll-hidden') === 'false')
+    if (design !== 'orbit') {
+      const nav = await navigationPage.locator('.bottom-nav').boundingBox()
+      const content = await navigationPage.locator('.workspace').boundingBox()
+      assert.ok(Math.abs(nav.x - content.x) < 1 && Math.abs(nav.width - content.width) < 1, `${design}: navigation matches content width`)
+      assert.match(await navigationPage.locator('.bottom-nav').evaluate(el => getComputedStyle(el).backdropFilter), /blur\(16px\)/)
+    }
+    await navigationPage.screenshot({ path: `tests/merged-mobile-${design}.png`, animations: 'disabled' })
+  }
+  await navigationPage.getByRole('button', { name: 'Klassisch', exact: true }).click()
+  await navigationPage.locator('#root').evaluate(el => { el.scrollTop = 0 })
+  await navigationPage.waitForFunction(() => Math.abs(document.querySelector('.top').getBoundingClientRect().top) < 1)
+  const headerHeight = await navigationPage.locator('.top').evaluate(el => el.offsetHeight)
+  const motion = await navigationPage.evaluate(() => new Promise(resolve => {
+    const root = document.querySelector('#root'), content = document.querySelector('.workspace')
+    const start = performance.now(), before = content.getBoundingClientRect().top + root.scrollTop, frames = []
+    root.scrollTop = 160
+    function sample() {
+      frames.push(content.getBoundingClientRect().top + root.scrollTop)
+      if (performance.now() - start < 700) requestAnimationFrame(sample)
+      else resolve({ before, frames, scroll: root.scrollTop })
+    }
+    requestAnimationFrame(sample)
+  }))
+  assert.ok(Math.abs(motion.before - motion.frames.at(-1) - headerHeight) < 1, 'Hidden header releases its full space')
+  assert.ok(motion.frames.filter(y => y < motion.before - 1 && y > motion.frames.at(-1) + 1).length >= 4, 'Content moves through intermediate positions')
+  assert.equal(motion.scroll, 160, 'Animation does not alter the user scroll position')
+  await navigationPage.locator('#root').evaluate(el => { el.scrollTop -= 12 })
+  await navigationPage.waitForFunction(() => document.querySelector('.top').getAttribute('data-scroll-hidden') === 'false')
+  await navigationContext.close()
+  console.log('Merged navigation: all three designs retained, mobile widths/blur and smooth root-scroll header passed.')
   // Existing navigation scenarios exercise the opt-in fast flow.
   await first.evaluate(user => localStorage.setItem('espresso-diary-quick-navigation:' + user, 'true'), accounts['alex@example.test'].id)
   await second.evaluate(user => localStorage.setItem('espresso-diary-quick-navigation:' + user, 'true'), accounts['sam@example.test'].id)
@@ -469,7 +510,7 @@ try {
   assert.equal(await first.locator('html').getAttribute('data-theme'), 'dark')
   assert.equal(await first.locator('meta[name="color-scheme"]').getAttribute('content'), 'dark')
   assert.equal(await first.locator('body').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(25, 23, 20)')
-  assert.equal(await first.locator('.bottom-nav').evaluate(el => getComputedStyle(el).backgroundColor), 'rgb(36, 33, 30)')
+  assert.match(await first.locator('.bottom-nav').evaluate(el => getComputedStyle(el).backgroundColor), /0\.48\)/, 'Floating navigation remains translucent in dark mode')
   await first.reload(); await openPersonalSettings(first)
   assert.equal(await first.locator('html').getAttribute('data-theme'), 'dark')
   await first.getByRole('button', { name: 'Einstellungen', exact: true }).click(); await openPersonalSettings(first)

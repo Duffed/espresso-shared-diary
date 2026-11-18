@@ -1,0 +1,45 @@
+/* Shared behavior layered over the independent design styles. */
+#root > .top {
+  position: sticky;
+  top: 0;
+  transform: translateY(0);
+  margin-bottom: 0;
+  transition: transform .42s cubic-bezier(.4, 0, .2, 1), margin-bottom .42s cubic-bezier(.4, 0, .2, 1);
+  will-change: transform;
+}
+#root > .top[data-scroll-hidden=true] {
+  transform: translateY(-100%);
+  margin-bottom: calc(-1 * var(--top-bar-height, 57px));
+}
+#root, .room-content, .wizard-fields, .shot-form, .bean-scroll-list { overflow-anchor: none; }
+.bottom-nav button { min-width: 0; }
+.bottom-nav .nav-label { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@media(min-width:768px) {
+  :root:not([data-design=orbit]) .bottom-nav .nav-label { max-width: min(64px, 100%); }
+}
+@media(max-width:767px) {
+  :root:is([data-design=classic], [data-design=glass]) .bottom-nav {
+    width: calc(100% - 2rem);
+    bottom: calc(12px + env(safe-area-inset-bottom));
+    padding: 8px;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 2px;
+    border: 1px solid var(--line);
+    border-radius: 40px;
+    background: color-mix(in srgb, var(--paper) 48%, transparent);
+    -webkit-backdrop-filter: blur(16px) saturate(160%);
+    backdrop-filter: blur(16px) saturate(160%);
+    box-shadow: 0 6px 24px color-mix(in srgb, var(--ink) 12%, transparent);
+  }
+  :root:is([data-design=classic], [data-design=glass]) .bottom-nav button { min-height: 56px; padding: 2px; gap: 4px; border-radius: 28px; }
+  :root:is([data-design=classic], [data-design=glass]) .bottom-nav button > span { width: min(58px, 100%); }
+  :root:is([data-design=classic], [data-design=glass]) .room-content:not(:has(.shot-form)) { padding-bottom: calc(108px + env(safe-area-inset-bottom)); }
+  :root:is([data-design=classic], [data-design=glass]) .room-content:has(.quick-brew) { padding-bottom: calc(180px + env(safe-area-inset-bottom)); }
+  :root:is([data-design=classic], [data-design=glass]) .quick-brew { bottom: calc(100px + env(safe-area-inset-bottom)); }
+}
+@media(max-width:500px) {
+  :root:is([data-design=classic], [data-design=glass]) .bottom-nav { width: calc(100% - 1.5rem); }
+}
+@media(prefers-reduced-transparency:reduce) {
+  :root:is([data-design=classic], [data-design=glass]) .bottom-nav { background: var(--paper); -webkit-backdrop-filter: none; backdrop-filter: none; }
+}

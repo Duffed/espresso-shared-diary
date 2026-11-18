@@ -18,6 +18,7 @@ import { ShotDialog } from './ShotDialog'
 import { ShotForm } from './ShotForm'
 import { HistoryFilters } from './HistoryFilters'
 import { useRoomNavigation } from './useRoomNavigation'
+import { useScrollHeader } from './useScrollHeader'
 import { emptyHistoryFilter, filterHistory } from './historyQuery'
 import { api, cachedRoom, cachedRooms, configured, loadRoom, loadRooms,
   pendingShots, removePending, savePending, syncPending } from './data'
@@ -29,6 +30,7 @@ import './style.css'
 import './glass.css'
 import './orbit.css'
 import './material.css'
+import './navigation.css'
 
 const timestamp = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' })
 const shortTimestamp = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -387,7 +389,7 @@ function RoomView({ room, user, online, pending, synchronize }: {
     </div>
     <nav className="bottom-nav" aria-label="Hauptnavigation">{([
       ['home', <Cup />, 'Start'], ['history', <HistoryIcon />, 'Verlauf'], ['beans', <BeanIcon />, 'Bohnen'], ['settings', <SettingsIcon />, 'Einstellungen'],
-    ] as const).map(([id, icon, label]) => <button key={id} aria-current={!form && page === id ? 'page' : undefined} onClick={() => setPage(id)}><span aria-hidden="true">{icon}</span>{label}</button>)}</nav>
+    ] as const).map(([id, icon, label]) => <button key={id} aria-current={!form && page === id ? 'page' : undefined} onClick={() => setPage(id)}><span aria-hidden="true">{icon}</span><div className="nav-label" title={label}>{label}</div></button>)}</nav>
   </div>
 }
 
@@ -396,6 +398,7 @@ function Workspace({ user }: { user: string }) {
   const [current, setCurrent] = useState(() => localStorage.getItem('room-' + user) ?? '')
   const [invitation, setInvitation] = useState(getInvitation)
   const [accountOpen, setAccountOpen] = useState(false)
+  const { headerRef, hidden: headerHidden, revealHeader } = useScrollHeader(accountOpen)
   const accountRef = useRef<HTMLDivElement>(null)
   const menuButtonRef = useRef<HTMLButtonElement>(null)
   useEffect(() => {
@@ -471,7 +474,7 @@ function Workspace({ user }: { user: string }) {
   }
 
   return <>
-    <header className="top"><div className="top-inner">
+    <header className="top" ref={headerRef} data-scroll-hidden={headerHidden} onFocusCapture={revealHeader}><div className="top-inner">
       {selected ? <a className="brand app-brand" href="/" title={rooms.find(room => room.id === selected)?.name}>{rooms.find(room => room.id === selected)?.name}</a> : <span />}
       <div className="actions">{!online && <span className="status">Offline</span>}
         <div className="account-menu-anchor" ref={accountRef} onBlur={event => {
