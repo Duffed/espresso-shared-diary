@@ -15,7 +15,7 @@
 .bottom-nav button { min-width: 0; }
 .bottom-nav .nav-label { min-width: 0; max-width: 100%; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 @media(min-width:768px) {
-  :root:not([data-design=orbit]) .bottom-nav .nav-label { max-width: min(64px, 100%); }
+  :root .bottom-nav .nav-label { max-width: min(64px, 100%); }
 }
 @media(max-width:767px) {
   :root:is([data-design=classic], [data-design=glass]) .bottom-nav {

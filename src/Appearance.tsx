@@ -23,7 +23,7 @@ export function Appearance() {
   return <SettingsGroup personal title="Darstellung" subtitle="Design, Farben und Erscheinungsbild" icon="M12 3a9 9 0 1 0 0 18h1a2 2 0 0 0 1-4c-1-1 0-3 2-3h2a3 3 0 0 0 3-3 9 9 0 0 0-9-8Z"><div className="appearance">
     <p className="meta">Dein Look auf diesem Gerät.</p>
     <div className="design-options" role="group" aria-label="Design">
-      {([['classic', 'Klassisch', 'Material · Expressiv'], ['glass', 'Glas', 'Licht & Tiefe'], ['orbit', 'Retro 98', 'Desktop · Nostalgie']] as const).map(([value, label, description]) => <button key={value} type="button" className="design-option" aria-label={label} aria-pressed={design === value} onClick={() => {
+      {([['classic', 'Klassisch', 'Material · Expressiv'], ['glass', 'Glas', 'Licht & Tiefe']] as const).map(([value, label, description]) => <button key={value} type="button" className="design-option" aria-label={label} aria-pressed={design === value} onClick={() => {
         try { localStorage.setItem('espresso-diary-design', value) } catch { setError('Das Design konnte auf diesem Gerät nicht gespeichert werden.'); return }
         setDesign(value); setError(''); window.dispatchEvent(new Event('espresso-theme-change'))
       }}><span className={'design-preview preview-' + value} aria-hidden="true"><i /><i /><i /></span><strong>{label}</strong><small>{description}</small></button>)}

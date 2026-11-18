@@ -142,15 +142,14 @@ Der Zustand von „Weitere Angaben & Import“ wird pro Nutzer auf dem jeweilige
 
 Die mobile Installationshilfe erklärt das Hinzufügen zum Homescreen für iOS/iPadOS und Android. In unterstützten Browsern bietet sie den nativen Installationsdialog an. Standalone-Start, `appinstalled` oder „Bereits installiert“ blenden den Hinweis dauerhaft auf diesem Gerät/Browser aus. Eine bestehende Installation lässt sich aus einem normalen Browserfenster nicht browserübergreifend zuverlässig erkennen. Während eines Bezugs bleibt der Hinweis ausgeblendet.
 
-**Retro 98** ist das dritte, unabhängige Design unter Einstellungen → Darstellung. Der interne Schlüssel `orbit` bleibt für bestehende Einstellungen erhalten. Die eigene Startseite verwendet Retro-Fenster, eine blaue Titelleiste, Arbeitsplatz-Verknüpfungen und eine Desktop-Taskleiste. Hell, Dunkel und Automatisch sowie Offline-Nutzung werden unterstützt.
 
-Ab 1024 px verwenden alle drei Designs eine vertikale Schrittleiste im Bezugsformular. Retro 98 zeigt nummerierte Schritte, plastische Buttons und Instrumente im Desktop-Stil. Mobil bleibt die Schrittnavigation horizontal. Animationen respektieren reduzierte Bewegung.
+Ab 1024 px verwenden beide Designs eine vertikale Schrittleiste im Bezugsformular. Mobil bleibt die Schrittnavigation horizontal. Animationen respektieren reduzierte Bewegung.
 
 Unter Einstellungen → Bedienung lässt sich die persönliche **Schnellauswahl** aktivieren (standardmäßig aus). Dann führt die Auswahl einer Bohne oder eines vorhandenen Profils direkt zum nächsten Schritt, einschließlich „Ohne Profil“. Sonst bestätigt man mit „Weiter“. Die Einstellung wird pro Nutzer auf diesem Gerät gespeichert und funktioniert auch offline; andere Nutzer und Räumeinstellungen werden nicht verändert.
 
 Unbenutzte Bohnen: Migration `202611140005_delete_unused_beans.sql` ausführen. In der Bohnenliste nach links wischen zum Löschen (mit Bestätigung), nach rechts zum Archivieren bzw. Reaktivieren. Mit Tastatur: Karte fokussieren, Entf bzw. Pfeil rechts. Bohnen mit Bezügen oder Packungen bleiben durch Fremdschlüssel geschützt.
 
-Bewertungen sind ausschließlich in der Bezugsübersicht bearbeitbar; im Verlauf bleiben sie schreibgeschützt. Eigene synchronisierte Bezüge erlauben dort auch das Speichern einer Mahlgradempfehlung. Das klassische Design verwendet Material-3-Expressive-inspirierte Farben, Flächen und Formen; Glas und Retro 98 bleiben eigenständig.
+Bewertungen sind ausschließlich in der Bezugsübersicht bearbeitbar; im Verlauf bleiben sie schreibgeschützt. Eigene synchronisierte Bezüge erlauben dort auch das Speichern einer Mahlgradempfehlung. Das klassische Design verwendet Material-3-Expressive-inspirierte Farben, Flächen und Formen; Glas bleibt eigenständig.
 
 Material-Design: bewegte gewellte Dial-Form, federnde Navigation und Startkarte. Bewegung reduzieren wird respektiert. Optional Material You mit vom Browser freigegebener System-Akzentfarbe (keine garantierte Android-Wallpaper-Palette) oder eigener Farbe, lokal gespeichert. Empfehlungen in Shot-Details speichern automatisch; konkrete Werte nach kurzer Einstellpause.
 
@@ -166,4 +165,6 @@ Mengen-Presets wechseln bei aktiver Schnellauswahl direkt zum Mahlgrad. Ein kurz
 
 Einstellungen: Darstellung, Bedienung und Kaffeemengen sind wie die Setup-Bereiche standardmäßig eingeklappt. Bedienung enthält Schnellauswahl, Dezimalstellen und Regler-Empfindlichkeit; Kaffeemengen enthält Grenzen und Presets. Die vorgeschlagenen Siebfotos werden in der Auswahl per SVG entlang ihrer Kontur freigestellt, ohne die Originaldateien zu verändern.
 
-Retro 98 ersetzt das bisherige Orbit-Design (gespeicherte Auswahl bleibt erhalten): Desktop-Fenster, Taskleiste, helle und dunkle Ansicht. Kaffeemengen werden in 0,5-g-Schritten eingestellt. Transparente Sieb-SVGs ersetzen die eingebauten PNGs; bereits gespeicherte Originalbilder werden per Inhalts-Hash bei der Anzeige erkannt. Eigene Bilder und historische Messwerte bleiben erhalten.
+Kaffeemengen werden in 0,5-g-Schritten eingestellt. Transparente Sieb-SVGs ersetzen die eingebauten PNGs; bereits gespeicherte Originalbilder werden per Inhalts-Hash bei der Anzeige erkannt. Eigene Bilder und historische Messwerte bleiben erhalten.
+
+Retro 98 wurde entfernt. Eine gespeicherte Retro-Auswahl wird beim Start auf Klassisch umgestellt; Farbschema und persönliche Farbpalette bleiben erhalten.

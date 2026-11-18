@@ -302,13 +302,13 @@ try {
   await login(navigationPage, 'alex@example.test')
   await navigationPage.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Einstellungen', exact: true }).click()
   await openPersonalSettings(navigationPage)
-  for (const name of ['Klassisch', 'Glas', 'Retro 98']) assert.equal(await navigationPage.getByRole('button', { name, exact: true }).count(), 1)
-  for (const [name, design] of [['Klassisch', 'classic'], ['Glas', 'glass'], ['Retro 98', 'orbit']]) {
+  for (const name of ['Klassisch', 'Glas']) assert.equal(await navigationPage.getByRole('button', { name, exact: true }).count(), 1)
+  for (const [name, design] of [['Klassisch', 'classic'], ['Glas', 'glass']]) {
     await navigationPage.getByRole('button', { name, exact: true }).click()
     assert.equal(await navigationPage.locator('html').getAttribute('data-design'), design)
     await navigationPage.locator('#root').evaluate(el => { el.scrollTop = 0 })
     await navigationPage.waitForFunction(() => document.querySelector('.top').getAttribute('data-scroll-hidden') === 'false')
-    if (design !== 'orbit') {
+    {
       const nav = await navigationPage.locator('.bottom-nav').boundingBox()
       const content = await navigationPage.locator('.workspace').boundingBox()
       assert.ok(Math.abs(nav.x - content.x) < 1 && Math.abs(nav.width - content.width) < 1, `${design}: navigation matches content width`)
@@ -337,7 +337,7 @@ try {
   await navigationPage.locator('#root').evaluate(el => { el.scrollTop -= 12 })
   await navigationPage.waitForFunction(() => document.querySelector('.top').getAttribute('data-scroll-hidden') === 'false')
   await navigationContext.close()
-  console.log('Merged navigation: all three designs retained, mobile widths/blur and smooth root-scroll header passed.')
+  console.log('Merged navigation: both designs retained, mobile widths/blur and smooth root-scroll header passed.')
   // Existing navigation scenarios exercise the opt-in fast flow.
   await first.evaluate(user => localStorage.setItem('espresso-diary-quick-navigation:' + user, 'true'), accounts['alex@example.test'].id)
   await second.evaluate(user => localStorage.setItem('espresso-diary-quick-navigation:' + user, 'true'), accounts['sam@example.test'].id)
@@ -1639,73 +1639,21 @@ try {
 
 
   await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Einstellungen', exact: true }).click(); await openPersonalSettings(first)
-  await first.getByRole('button', { name: 'Retro 98', exact: true }).click()
-  await first.waitForFunction(() => document.documentElement.dataset.design === 'orbit')
-  for (const mode of ['Hell', 'Dunkel']) {
-    await first.getByRole('button', { name: mode, exact: true }).click()
-    await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Start', exact: true }).click()
-    await first.locator('.orbit-home').waitFor()
-    for (const width of [320, 390, 1280]) {
-      await first.setViewportSize({ width, height: 844 })
-      assert.ok(await first.evaluate(() => document.documentElement.scrollWidth <= innerWidth), 'Orbit fits viewport ' + width)
-      const nav = await first.locator('.bottom-nav').boundingBox()
-      if (width >= 768) assert.ok(nav.width > nav.height * 4 && nav.y > 700, 'Retro uses a desktop taskbar')
-      if (width >= 1024) {
-        await first.getByRole('button', { name: 'Menü', exact: true }).click()
-        await first.locator('#account-menu').evaluate(el => Promise.all(el.getAnimations().map(a => a.finished)))
-        assert.ok(await first.locator('#account-menu').evaluate(menu => {
-          const m = menu.getBoundingClientRect()
-          const x = m.right - 12, y = m.top + 12
-          return menu.contains(document.elementFromPoint(x, y))
-        }), 'Account menu is above the overlapping navigation')
-        await first.screenshot({ path: 'tests/orbit-menu-layer-' + mode + '.png', animations: 'disabled' })
-        await first.getByRole('button', { name: 'Menü', exact: true }).click()
-      }
-
-      assert.equal(await first.locator('.retro-window').count(), 2)
-      assert.equal(await first.locator('.orbit-launch').evaluate(el => getComputedStyle(el).borderRadius), '0px')
-      await first.screenshot({ path: 'tests/orbit-home-' + mode + '-' + width + '.png', animations: 'disabled', fullPage: true })
-      await first.locator('.orbit-launch').click()
-      await first.getByRole('button', { name: 'Schritt 2: Kaffeemenge', exact: true }).click()
-      if (width >= 1024) {
-        const steps = await first.locator('.step-track').boundingBox()
-        const fields = await first.locator('.wizard-fields').boundingBox()
-        assert.ok(steps.height > steps.width && steps.x + steps.width <= fields.x, 'Orbit has its own desktop step rail')
-      }
-      const dose = first.getByRole('slider', { name: 'Dosis', exact: true })
-      const value = Number(await dose.getAttribute('aria-valuenow'))
-      await dose.press('ArrowUp')
-      assert.ok(Number(await dose.getAttribute('aria-valuenow')) > value)
-      assert.equal(await first.locator('.step-icon:visible').count(), 0, 'Orbit keeps its numbered steps')
-      assert.equal(await first.locator('.dial-aura').isVisible(), false, 'Orbit does not inherit glass artwork')
-      assert.equal(await first.locator('.dose-basket').isVisible(), true, 'Orbit uses the filling basket')
-      await first.screenshot({ path: 'tests/orbit-dose-' + mode + '-' + width + '.png', animations: 'disabled' })
-      const doseAction = await first.locator('.wizard-actions > .primary').boundingBox()
-      await first.getByRole('button', { name: 'Schritt 5: Ergebnis', exact: true }).click()
-      const resultAction = await first.locator('.wizard-actions > .primary').boundingBox()
-      assert.ok(Math.abs(doseAction.y - resultAction.y) <= 1, 'Orbit actions stay aligned: ' + JSON.stringify({ width, doseAction, resultAction }))
-
-      await first.screenshot({ path: 'tests/orbit-result-' + mode + '-' + width + '.png', animations: 'disabled' })
-      await first.locator('.shot-form > .section-heading').getByRole('button', { name: 'Abbrechen', exact: true }).click(); await openPersonalSettings(first)
-      await first.locator('.orbit-home').waitFor()
-    }
-    await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Einstellungen', exact: true }).click(); await openPersonalSettings(first)
-  }
+  await first.evaluate(() => localStorage.setItem('espresso-diary-design', 'orbit'))
   await first.reload(); await openPersonalSettings(first)
-  await first.getByRole('button', { name: 'Retro 98', exact: true }).waitFor()
-  assert.equal(await first.getByRole('button', { name: 'Retro 98', exact: true }).getAttribute('aria-pressed'), 'true')
+  assert.equal(await first.locator('html').getAttribute('data-design'), 'classic', 'Legacy Retro selection migrates to Classic')
+  assert.equal(await first.evaluate(() => localStorage.getItem('espresso-diary-design')), 'classic')
+  assert.equal(await first.getByRole('button', { name: 'Retro 98', exact: true }).count(), 0)
   await mobile.setOffline(true)
   await first.reload(); await openPersonalSettings(first)
-  await first.getByRole('button', { name: 'Retro 98', exact: true }).waitFor()
-  assert.equal(await first.locator('html').getAttribute('data-design'), 'orbit')
+  assert.equal(await first.locator('html').getAttribute('data-design'), 'classic')
   await mobile.setOffline(false)
   await first.getByRole('button', { name: 'Glas', exact: true }).click()
   await first.waitForFunction(() => document.documentElement.dataset.design === 'glass')
   await first.getByRole('navigation', { name: 'Hauptnavigation' }).getByRole('button', { name: 'Start', exact: true }).click()
-  assert.equal(await first.locator('.orbit-home').count(), 0)
   await first.locator('.brew-hero').waitFor()
   await first.setViewportSize({ width: 390, height: 844 })
-  console.log('Retro 98: desktop windows and taskbar, desktop step rail, independent dials, light/dark, 320/390/1280 px, keyboard controls, offline persistence and glass restoration passed.')
+  console.log('Removed Retro selection migrates to Classic, persists offline, and Glass remains available.')
   const installHelp = first.getByRole('complementary', { name: 'App installieren' })
   await installHelp.locator('summary').click()
   assert.ok((await installHelp.textContent()).includes('Safari'))

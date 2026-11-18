@@ -1,5 +1,3 @@
-import { OrbitHome } from './OrbitHome'
-import { useDesign } from './useDesign'
 import { InstallHelp } from './InstallHelp'
 import { BasketIcon, BeanIcon, CalendarIcon, EditIcon, GrindIcon, HistoryIcon, LogoutIcon, PressureIcon, ProfileIcon, ReloadIcon, SettingsIcon, TimerIcon, TrashIcon } from './Icons'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
@@ -28,7 +26,6 @@ import '@fontsource-variable/dm-sans'
 import '@fontsource/instrument-serif/400.css'
 import './style.css'
 import './glass.css'
-import './orbit.css'
 import './material.css'
 import './navigation.css'
 
@@ -151,7 +148,6 @@ function RoomView({ room, user, online, pending, synchronize }: {
 }) {
   const [data, setData] = useState<RoomData>()
   const [error, setError] = useState('')
-  const design = useDesign()
   const { page, setPage, form, setForm, stage, setStage, closeForm, formToken } = useRoomNavigation(user + ':' + room)
   const [selectedShot, setSelectedShot] = useState<string | null>(null)
   useEffect(() => { setSelectedShot(null); document.getElementById('root')?.scrollTo({ top: 0 }) }, [page, form])
@@ -315,8 +311,7 @@ function RoomView({ room, user, online, pending, synchronize }: {
     <div className="room-content" key={form ? 'form' : page}>
     {form ? <ShotForm key={form === true ? 'new' : form.id} data={{ ...data, shots: timeline.filter(shot => !queued.some(item => item.shot.id === shot.id && item.error)) }} user={user} refresh={refresh}
       editing={form === true ? undefined : form} draftKey={`espresso-draft:${user}:${room}:${formToken}`} stage={stage} onStageChange={setStage} onSave={save} onClose={() => setForm(undefined)} /> : <>
-    {page === 'home' && design === 'orbit' && <OrbitHome shots={timeline.length} beans={data.beans?.length ?? 0} onBrew={() => setForm(true)} onHistory={() => setPage('history')} onBeans={() => setPage('beans')} />}
-    {page === 'home' && design !== 'orbit' && <section className="home-screen">
+    {page === 'home' && <section className="home-screen">
       <button className="brew-hero" onClick={() => setForm(true)}><span className="hero-cup"><Cup /></span><span><small>Zeit für Espresso</small><strong>Neuer Bezug</strong><span>In fünf Schritten zu deinem Kaffee</span></span><b>＋</b></button>
       <div className="home-links"><button onClick={() => setPage('history')}><span><HistoryIcon /></span><strong>Verlauf</strong><small>{timeline.length} Bezüge entdecken →</small></button><button onClick={() => setPage('beans')}><span><BeanIcon /></span><strong>Deine Bohnen</strong><small>{data.beans?.length ?? 0} Kaffeesorten →</small></button></div>
       <div className="section-heading"><h2>Letzte Bezüge</h2>{timeline.length > 0 && <button className="quiet" onClick={() => setPage('history')}>Alle ansehen →</button>}</div>

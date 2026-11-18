@@ -5,14 +5,14 @@
     let choice = 'system'
     let design = 'classic'
     try { choice = localStorage.getItem('espresso-diary-theme') || 'system' } catch {}
-    try { const saved = localStorage.getItem('espresso-diary-design'); if (saved === 'glass' || saved === 'orbit') design = saved } catch {}
+    try { const saved = localStorage.getItem('espresso-diary-design'); if (saved === 'glass') design = saved; else if (saved === 'orbit') localStorage.setItem('espresso-diary-design', 'classic') } catch {}
     let palette = 'default', seed = '#654532'
     try { const saved = localStorage.getItem('espresso-diary-palette'); if (saved === 'device' || saved === 'custom') palette = saved; const color = localStorage.getItem('espresso-diary-seed'); if (/^#[0-9a-f]{6}$/i.test(color || '')) seed = color } catch {}
     document.documentElement.dataset.palette = palette
     document.documentElement.style.setProperty('--you-seed', seed)
     const dark = choice === 'dark' || (choice !== 'light' && system.matches)
     const theme = dark ? 'dark' : 'light'
-    const color = design === 'orbit' ? (dark ? '#003e42' : '#008080') : design === 'glass' ? (dark ? '#101017' : '#f3eff2') : (dark ? '#191714' : '#f7f3ed')
+    const color = design === 'glass' ? (dark ? '#101017' : '#f3eff2') : (dark ? '#191714' : '#f7f3ed')
     document.documentElement.dataset.design = design
     document.documentElement.dataset.theme = theme
     document.documentElement.style.colorScheme = theme
