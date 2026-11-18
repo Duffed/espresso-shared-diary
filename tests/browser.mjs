@@ -216,9 +216,20 @@ await once(server, 'listening')
 const origin = 'http://127.0.0.1:' + server.address().port
 let browser
 
+async function settleHeader(page) {
+  await page.evaluate(async () => {
+    await new Promise(requestAnimationFrame)
+    await new Promise(requestAnimationFrame)
+    await Promise.allSettled(document.querySelector('.top')?.getAnimations().map(animation => animation.finished) ?? [])
+  })
+}
+
 async function dragVertical(page, label, distance, horizontal = 0) {
   const slider = page.getByRole('slider', { name: label, exact: true })
   await slider.scrollIntoViewIfNeeded()
+  await settleHeader(page)
+  // Scrolling may animate the header; wait for the target to stop moving.
+  await slider.hover()
   const box = await slider.boundingBox()
   const x = box.x + box.width / 2, y = box.y + box.height / 2
   await page.mouse.move(x, y)
@@ -641,7 +652,7 @@ try {
   assert.equal(await first.getByRole('slider', { name: 'Mahlgrad' }).getAttribute('aria-valuenow'), '0.2')
   await first.getByRole('button', { name: 'Zurück', exact: true }).click()
   assert.equal(await first.getByRole('slider', { name: 'Dosis' }).getAttribute('aria-valuenow'), '19')
-  const dial = first.getByRole('slider', { name: 'Dosis' }); await dial.scrollIntoViewIfNeeded(); const rect = await dial.boundingBox()
+  const dial = first.getByRole('slider', { name: 'Dosis' }); await dial.scrollIntoViewIfNeeded(); await settleHeader(first); const rect = await dial.boundingBox()
   const fillBefore = Number(await first.locator('.basket-coffee').getAttribute('height'))
   await first.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2)
   await first.mouse.down(); await first.mouse.move(rect.x + rect.width / 2, rect.y + rect.height / 2 - 80); await first.mouse.up()
@@ -850,6 +861,7 @@ try {
   assert.equal(await profileGroup.getByRole('button', { name: 'Standard löschen', exact: true }).count(), 0)
   const dragHandle = profileGroup.getByRole('button', { name: 'Spontaner Espresso verschieben', exact: true })
   await dragHandle.evaluate(el => el.scrollIntoView({ block: 'center' }))
+  await settleHeader(first)
   const dragFrom = await dragHandle.boundingBox()
   const dragTo = await profileGroup.getByRole('button', { name: 'Standard verschieben', exact: true }).boundingBox()
   const profileTouch = await mobile.newCDPSession(first)
@@ -892,6 +904,7 @@ try {
   async function turn(label, degrees) {
     const dial = first.getByRole('slider', { name: label, exact: true })
     await dial.scrollIntoViewIfNeeded()
+  await settleHeader(first)
     const box = await dial.boundingBox()
     const x = box.x + box.width / 2, y = box.y + box.height / 2, radius = box.width * .44
     await first.mouse.move(x, y - radius)
@@ -929,6 +942,7 @@ try {
   async function swipe(distance) {
     const copy = entries.first().locator('.entry-copy')
     await copy.scrollIntoViewIfNeeded()
+  await settleHeader(first)
     const box = await copy.boundingBox()
     const x = box.x + box.width - 5, y = box.y + 5
     await touch.send('Input.dispatchTouchEvent', { type: 'touchStart', touchPoints: [{ x, y }] })
@@ -1159,6 +1173,7 @@ try {
   // Real touch dragging adjusts the roller without scrolling the surrounding form.
   const outputRoller = first.getByRole('slider', { name: 'Output', exact: true })
   await outputRoller.scrollIntoViewIfNeeded()
+  await settleHeader(first)
   const outputBefore = Number(await outputRoller.getAttribute('aria-valuenow'))
   const fieldScroll = await first.locator('.wizard-fields').evaluate(el => el.scrollTop)
   const rollerBox = await outputRoller.boundingBox()
@@ -1171,6 +1186,7 @@ try {
   assert.equal(await first.locator('.wizard-fields').evaluate(el => el.scrollTop), fieldScroll)
   await first.getByRole('radio', { name: 'Konkreter Wert', exact: true }).check()
   await first.locator('.shot-feedback').scrollIntoViewIfNeeded()
+  await settleHeader(first)
   await first.screenshot({ path: 'tests/mobile-feedback.png', animations: 'disabled' })
   for (const [width, height] of [[320, 568], [390, 844], [1024, 768]]) {
     await first.setViewportSize({ width, height })
@@ -1212,6 +1228,7 @@ try {
   const profilesGroup = first.locator('.settings-group').filter({ has: first.locator('summary strong', { hasText: 'Bezugsprofile' }) })
   await profilesGroup.locator(':scope > summary').click()
   await profilesGroup.locator('.profile-admin-list').evaluate(el => el.scrollIntoView({ block: 'center' }))
+  await settleHeader(first)
   const profileRow = profilesGroup.locator('.profile-admin-list > li').filter({ hasText: 'Gemeinsamer Flow' }).first()
   const aligned = await profileRow.evaluate(row => {
     const flow = row.querySelector('.profile-flow-toggle').getBoundingClientRect()
@@ -1292,6 +1309,7 @@ try {
   await first.getByRole('button', { name: 'Änderungen speichern', exact: true }).click()
   await packBean.getByText('Noch ca. 800 g', { exact: true }).waitFor()
   await packBean.evaluate(el => el.scrollIntoView({ block: 'center' }))
+  await settleHeader(first)
   await first.screenshot({ path: 'tests/mobile-package-stock.png', animations: 'disabled' })
   await first.getByRole('button', { name: 'Verbrauch', exact: true }).click()
   await first.getByLabel('Packung', { exact: true }).selectOption(newPack.id)
@@ -1320,6 +1338,7 @@ try {
   await first.waitForFunction(({ was }) => document.querySelector('[aria-label="Gemeinsamer Flow Flow-based"]')?.getAttribute('aria-checked') !== was, { was: wasPressed })
   assert.equal(await flowGroup.locator('.profile-flow input').count(), 0)
   await flowGroup.locator('.profile-admin-list').evaluate(el => el.scrollIntoView({ block: 'center' }))
+  await settleHeader(first)
   await first.screenshot({ path: 'tests/mobile-profile-toggle.png', animations: 'disabled' })
   await first.evaluate(() => { document.documentElement.dataset.theme = 'dark' })
   await first.screenshot({ path: 'tests/mobile-profile-toggle-dark.png', animations: 'disabled' })
@@ -1415,6 +1434,7 @@ try {
       await glassProfiles.locator(':scope > summary').click()
       const activeFlow = glassProfiles.locator('.profile-flow-toggle[aria-checked="true"]').first()
       await activeFlow.scrollIntoViewIfNeeded()
+  await settleHeader(first)
       const contrast = await activeFlow.evaluate(el => {
         const style = getComputedStyle(el)
         const luminance = color => color.match(/[\d.]+/g).slice(0, 3).map(Number).map(v => { v /= 255; return v <= .04045 ? v / 12.92 : ((v + .055) / 1.055) ** 2.4 }).reduce((sum, v, i) => sum + v * [.2126, .7152, .0722][i], 0)
@@ -1590,27 +1610,25 @@ try {
   const overview = hoverPage.getByRole('dialog')
   await overview.waitFor()
   assert.equal(await overview.locator('.shot-dialog-photo').count(), 1)
-  assert.equal(await overview.locator('.shot-dialog-values dt svg').count(), 4)
+  assert.deepEqual(await overview.locator('.shot-dialog-values dt').allTextContents(), ['Kaffeemenge', 'Output', 'Laufzeit', 'Mahlgrad', 'Profil'])
+  assert.equal(await overview.locator('.shot-dialog-values dt svg').count(), 5)
   assert.equal(await overview.evaluate(el => getComputedStyle(el).animationName), 'shot-dialog-in')
   assert.ok((await overview.evaluate(el => getComputedStyle(el, '::backdrop').backdropFilter)).includes('blur'))
-  const savedNote = await overview.locator('.detail-note-text').textContent().catch(() => '')
+  const noteInput = overview.getByRole('textbox', { name: 'Notiz', exact: true })
+  const savedNote = await noteInput.inputValue()
   const longNote = 'Ein ausführlicher Eindruck vom Bezug. '.repeat(35)
-  await overview.getByRole('button', { name: /Notiz (bearbeiten|hinzufügen)/ }).click()
-  await overview.getByLabel('Deine Notiz', { exact: true }).fill(longNote)
-  await overview.getByRole('button', { name: 'Notiz speichern', exact: true }).click()
-  await overview.locator('.detail-note-text').waitFor()
-  assert.equal(await overview.locator('.detail-note-text').textContent(), longNote.trim())
-  assert.ok(await overview.locator('.detail-note-text').evaluate(el => el.scrollHeight > el.clientHeight))
+  await noteInput.fill(longNote)
+  await overview.getByText('Automatisch gespeichert.', { exact: true }).waitFor()
+  assert.ok(shots.some(shot => shot.note === longNote.trim()), 'Note autosaves the trimmed value')
+  assert.ok(await noteInput.evaluate(el => el.scrollHeight > el.clientHeight))
   for (const width of [1280, 390]) {
     await hoverPage.setViewportSize({ width, height: 844 })
     const preview = hoverPage.locator('.history-entry .entry-feedback .shot-note').filter({ hasText: longNote.trim() }).first()
     assert.ok(await preview.evaluate(el => el.scrollHeight > el.clientHeight), 'Note preview is clipped at ' + width)
   }
-  await overview.getByRole('button', { name: 'Notiz bearbeiten', exact: true }).click()
-  assert.equal(await overview.getByLabel('Deine Notiz', { exact: true }).inputValue(), longNote.trim())
-  await overview.getByLabel('Deine Notiz', { exact: true }).fill(savedNote)
-  await overview.getByRole('button', { name: 'Notiz speichern', exact: true }).click()
-  await overview.getByRole('button', { name: /Notiz (bearbeiten|hinzufügen)/ }).waitFor()
+  assert.equal(await noteInput.inputValue(), longNote)
+  await noteInput.fill(savedNote)
+  await overview.getByText('Automatisch gespeichert.', { exact: true }).waitFor()
   await hoverPage.setViewportSize({ width: 390, height: 844 })
   assert.ok((await overview.boundingBox()).width <= 390)
   await hoverPage.screenshot({ path: 'tests/shot-overview.png', animations: 'disabled' })
