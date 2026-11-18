@@ -1,10 +1,13 @@
-import { useEffect, useRef, useState, type FormEvent, type PointerEvent, type ReactNode } from 'react'
+import { BasketPreview } from './BasketPreview'
+import { SettingsGroup } from './SettingsGroup'
+import { SettingsToggle } from './SettingsToggle'
+import { useEffect, useRef, useState, type FormEvent, type PointerEvent } from 'react'
 import { api } from './data'
 import { decimal, DiaryError, formatNumber, grinderName, validateRoomPassword, type Basket, type Grinder, type ImageResult, type RoomData } from './model'
 import { errorText, Notice, Photo } from './ui'
 import { PhotoPicker } from './PhotoPicker'
 import { usePhotoPaste } from './usePhotoPaste'
-import { TrashIcon } from './Icons'
+import { ArchiveIcon, TrashIcon } from './Icons'
 
 function SettingNumber({ name, label, initial, min, max, step }: { name: string; label: string; initial: number; min: number; max: number; step: number }) {
   const [value, setValue] = useState(initial)
@@ -25,7 +28,7 @@ const basketImages = [
   { id: 'stepdown', name: 'Stepdown' },
 ]
 
-const basketImageUrl = (id: string) => import.meta.env.BASE_URL + 'baskets/' + id + '.png'
+const basketImageUrl = (id: string) => import.meta.env.BASE_URL + 'baskets/' + id + '.svg'
 
 function EquipmentForm({ draft, room, onClose, onSaved }: {
   draft: EquipmentDraft; room: string; onClose: () => void; onSaved: () => Promise<void>
@@ -114,7 +117,16 @@ function EquipmentForm({ draft, room, onClose, onSaved }: {
       if (basketImage) {
         const response = await fetch(basketImageUrl(basketImage))
         if (!response.ok) throw new DiaryError('Das ausgewählte Siebbild konnte nicht geladen werden.')
-        photo = await response.blob()
+        const asset = URL.createObjectURL(await response.blob())
+        try {
+          const image = new Image()
+          image.src = asset
+          await image.decode()
+          const canvas = document.createElement('canvas')
+          canvas.width = canvas.height = 256
+          canvas.getContext('2d')!.drawImage(image, 0, 0, 256, 256)
+          photo = await new Promise<Blob>((resolve, reject) => canvas.toBlob(blob => blob ? resolve(blob) : reject(new DiaryError('Das Siebbild konnte nicht erstellt werden.')), 'image/png'))
+        } finally { URL.revokeObjectURL(asset) }
       }
       if (photo) {
         const extensions: Record<string, string> = { 'image/jpeg': 'jpg', 'image/png': 'png', 'image/webp': 'webp' }
@@ -176,7 +188,7 @@ function EquipmentForm({ draft, room, onClose, onSaved }: {
             setFile(undefined)
             setClearImage(false)
           }}>
-            <Photo url={basketImageUrl(image.id)} />
+            <BasketPreview id={image.id} url={basketImageUrl(image.id)} />
           </button>)}</div>
       </fieldset>
     </>}
@@ -193,16 +205,13 @@ function EquipmentForm({ draft, room, onClose, onSaved }: {
   </form>
 }
 
-function SettingsGroup({ title, subtitle, icon, children }: { title: string; subtitle: string; icon: string; children: ReactNode }) {
-  return <details className="settings-group"><summary><span className="settings-icon" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" strokeLinecap="round" strokeLinejoin="round"><path d={icon} /></svg></span><span className="settings-label"><strong>{title}</strong><small>{subtitle}</small></span><span className="settings-chevron" aria-hidden="true">›</span></summary><div className="settings-content">{children}</div></details>
-}
-
-export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promise<void> }) {
+export function Admin({ data, refresh, admin }: { admin: boolean; data: RoomData; refresh: () => Promise<void> }) {
   const [draft, setDraft] = useState<EquipmentDraft>()
   const [error, setError] = useState('')
   const [invite, setInvite] = useState('')
   const [passwordNotice, setPasswordNotice] = useState('')
   const [profileName, setProfileName] = useState('')
+  const [flowBased, setFlowBased] = useState(false)
   const [busy, setBusy] = useState(false)
   const { room } = data
   const drag = useRef<{ pointer: number; source: number; target: number; ids: string[] } | null>(null)
@@ -275,12 +284,12 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
           setDragPreview({ source: item.id, target: item.id })
         }} onPointerMove={dragProfile} onPointerUp={event => finishDrag(event)} onPointerCancel={event => finishDrag(event, true)} onLostPointerCapture={event => { if (event.target === event.currentTarget) finishDrag(event, true) }}
         onKeyDown={event => { if (event.key === 'ArrowUp' || event.key === 'ArrowDown') { event.preventDefault(); moveProfile(index, event.key === 'ArrowUp' ? -1 : 1) } }}><svg viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">{[6, 12, 18].flatMap(y => [8, 16].map(x => <circle key={`${x}-${y}`} cx={x} cy={y} r="1.5" />))}</svg></button>}
-      <span>{item.name}</span>
+      <span className="profile-name" title={item.name}>{item.name}</span><SettingsToggle className="profile-flow-toggle" label="Flow-based" accessibleLabel={item.name + " Flow-based"} checked={item.flow_based ?? false} disabled={busy} onChange={flow_based => void change(() => api.from('profiles').update({ flow_based }).eq('id', item.id))} />
       <div className="actions profile-actions">
         {item.ever_used === false && !data.shots.some(shot => shot.profile === item.name) && <button type="button" className="quiet profile-icon" aria-label={`${item.name} löschen`} title="Unbenutztes Profil löschen" disabled={busy} onClick={() => void change(() => api.rpc('delete_unused_profile', { profile_id: item.id }))}><TrashIcon /></button>}
-        <button type="button" className="quiet" disabled={busy} onClick={() => void change(() =>
+        <button type="button" className="quiet profile-icon" aria-label={item.archived ? 'Aktivieren' : 'Archivieren'} title={item.archived ? 'Profil aktivieren' : 'Profil archivieren'} disabled={busy} onClick={() => void change(() =>
           api.from('profiles').update({ archived: !item.archived }).eq('id', item.id))}>
-          {item.archived ? 'Aktivieren' : 'Archivieren'}
+          <ArchiveIcon restore={item.archived} />
         </button>
       </div>
     </li>)}</ul>
@@ -289,7 +298,7 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
   return <section className="admin settings-hub" aria-label="Raumeinstellungen">
     <Notice>{error}</Notice>
     <span className="settings-category">DEIN SETUP</span>
-    <SettingsGroup title="Mühlen" subtitle={data.grinders.filter(item => !item.archived).length + ' aktiv · Mahlgrad & Skala'} icon="M6 3h12l-2 6H8L6 3Zm2 6v4h8V9M7 13h10v8H7v-8Zm3 4h4"><div className="section-heading"><h3>Mühlen</h3>
+    {admin && <><SettingsGroup title="Mühlen" subtitle={data.grinders.filter(item => !item.archived).length + ' aktiv · Mahlgrad & Skala'} icon="M6 3h12l-2 6H8L6 3Zm2 6v4h8V9M7 13h10v8H7v-8Zm3 4h4"><div className="section-heading"><h3>Mühlen</h3>
         <button type="button" onClick={() => setDraft({ kind: 'grinders' })}>Hinzufügen</button></div>
         <ul className="admin-list">{data.grinders.map(item => <li key={item.id}>
           <Photo photo={item.photo} url={item.image_url} /><span>{grinderName(item)}{item.archived && <small>Archiviert</small>}
@@ -314,20 +323,20 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
         </li>)}</ul>
       {draft?.kind === 'baskets' && <EquipmentForm key={'baskets' + (draft.item?.id ?? '')} draft={draft} room={room.id} onClose={() => setDraft(undefined)} onSaved={async () => { setDraft(undefined); await refresh() }} />}
     </SettingsGroup>
+    </>}
     <SettingsGroup title="Bezugsprofile" subtitle={data.profiles.filter(item => !item.archived).length + ' aktiv · Dein Espresso nach deinem Geschmack'} icon="M3 17l5-9 5 5 5-9 3 3M3 21h18">
-      <form className="inline" onSubmit={async e => {
+      <details className="profile-create"><summary>＋ Neues Profil</summary><form className="profile-create-form" onSubmit={async e => {
         e.preventDefault()
-        if (await change(() => api.from('profiles').insert({ room_id: room.id, name: profileName.trim() }))) setProfileName('')
+        if (await change(() => api.rpc('create_room_profile', { target_room: room.id, profile_name: profileName.trim(), is_flow_based: flowBased }))) setProfileName('')
       }}><label>Profilname<input value={profileName} onChange={e => setProfileName(e.target.value)} required maxLength={100} /></label>
-        <button disabled={busy}>Hinzufügen</button></form>
+        <SettingsToggle className="profile-flow-create" label="Flow-based" checked={flowBased} disabled={busy} onChange={setFlowBased} /><button disabled={busy}>Hinzufügen</button></form></details>
       {profileList(activeProfiles)}
       {archivedProfiles.length > 0 && <details className="archived-profiles"><summary>Archivierte Profile ({archivedProfiles.length})</summary>{profileList(archivedProfiles)}</details>}
     </SettingsGroup>
-    <SettingsGroup title="Import" subtitle={room.gaggimate ? 'GaggiMate ist aktiviert' : 'GaggiMate verbinden'} icon="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5">
-    <label className="check settings-switch"><input type="checkbox" checked={room.gaggimate} disabled={busy} onChange={e => {
-      const gaggimate = e.target.checked
+    {admin && <><SettingsGroup title="Import" subtitle={room.gaggimate ? 'GaggiMate ist aktiviert' : 'GaggiMate verbinden'} icon="M12 3v12m-4-4 4 4 4-4M4 16v5h16v-5">
+    <SettingsToggle label="GaggiMate-Import" description="Bezüge aus deiner Maschine übernehmen" checked={room.gaggimate} disabled={busy} onChange={gaggimate => {
       void change(() => api.from('rooms').update({ gaggimate }).eq('id', room.id))
-    }} role="switch" /> <span><strong>GaggiMate-Import</strong><small>Bezüge aus deiner Maschine übernehmen</small></span></label>
+    }} />
     </SettingsGroup>
     <span className="settings-category">GEMEINSAM KAFFEE MACHEN</span>
     <SettingsGroup title="Raum teilen" subtitle="Raumlink & Passwort" icon="M10 13a5 5 0 0 0 7 0l3-3a5 5 0 0 0-7-7l-2 2M14 11a5 5 0 0 0-7 0l-3 3a5 5 0 0 0 7 7l2-2">
@@ -362,6 +371,9 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
       {invite && <label>Einladungslink<input readOnly value={invite} onFocus={e => e.target.select()} /></label>}
       <ul className="admin-list">{data.members.map(member => <li key={member.user_id}>
         <span>{member.name}{member.admin && <small>Admin</small>}</span>
+        {!member.admin && <button type="button" disabled={busy} onClick={() => {
+          if (confirm(member.name + ' zum Admin ernennen?')) void change(() => api.rpc('promote_room_member', { target_room: room.id, target_user: member.user_id }))
+        }}>Zum Admin ernennen</button>}
         {!member.admin && <button type="button" className="quiet" disabled={busy} onClick={() => {
           if (confirm(member.name + ' aus dem Raum entfernen?')) void change(() =>
             api.from('members').delete().eq('room_id', room.id).eq('user_id', member.user_id))
@@ -378,6 +390,6 @@ export function Admin({ data, refresh }: { data: RoomData; refresh: () => Promis
               return result
             })}>Widerrufen</button></li>)}</ul>
       </>}
-    </SettingsGroup>
+    </SettingsGroup></>}
   </section>
 }

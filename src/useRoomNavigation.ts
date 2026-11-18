@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
-import type { Shot } from './model'
+import { shotSteps, type Shot } from './model'
 
 type Page = 'home' | 'history' | 'beans' | 'settings'
 type Route = { page: Page; form?: true | Shot; stage: number; origin?: number; formToken?: string }
@@ -85,7 +85,7 @@ export function useRoomNavigation(owner: string) {
   function setStage(stage: number) {
     const entry = current.current
     if (stage === entry.route.stage) return
-    if (stage < entry.route.stage) {
+    if (shotSteps.indexOf(stage) < shotSteps.indexOf(entry.route.stage)) {
       for (let depth = entry.depth - 1; depth > (entry.route.origin ?? -1); depth--) {
         if (entries.current[depth]?.stage === stage) { history.go(depth - entry.depth); return }
       }

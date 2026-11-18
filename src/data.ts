@@ -1,6 +1,6 @@
 import { createClient } from '@supabase/supabase-js'
 import { openDB, type DBSchema } from 'idb'
-import type { Bean, Basket, Grinder, Invite, Member, Pending, Profile, Room, RoomData, Shot } from './model'
+import type { BeanPackage, PackageAdjustment, Bean, Basket, Grinder, Invite, Member, Pending, Profile, Room, RoomData, Shot } from './model'
 import { DiaryError } from './model'
 
 export const configured = Boolean(import.meta.env.VITE_SUPABASE_URL && import.meta.env.VITE_SUPABASE_PUBLISHABLE_KEY)
@@ -61,18 +61,23 @@ export async function loadRoom(user: string, roomId: string): Promise<RoomData> 
     await db.delete('details', [user, roomId])
     throw new DiaryError('Du hast keinen Zugriff mehr auf diesen Raum.')
   }
-  const [members, invites, grinders, baskets, profiles, beans] = await Promise.all([
+  const [members, invites, grinders, baskets, profiles, beans, packages, adjustments] = await Promise.all([
     api.from('members').select('*').eq('room_id', roomId).order('name').returns<Member[]>(),
     api.from('invites').select('*').eq('room_id', roomId).order('expires_at', { ascending: false }).returns<Invite[]>(),
     api.from('grinders').select('*').eq('room_id', roomId).order('brand').returns<Grinder[]>(),
     api.from('baskets').select('*').eq('room_id', roomId).order('name').returns<Basket[]>(),
     api.from('profiles').select('*').eq('room_id', roomId).order('sort_order').order('name').order('id').returns<Profile[]>(),
     api.from('beans').select('*').eq('room_id', roomId).order('name').returns<Bean[]>(),
+    api.from('bean_packages').select('*').eq('room_id', roomId).order('opened_at', { ascending: false }).returns<BeanPackage[]>(),
+    api.from('package_adjustments').select('*').eq('room_id', roomId).order('created_at').returns<PackageAdjustment[]>(),
   ])
   for (const result of [members, invites, grinders, baskets, profiles]) {
     if (result.error) throw result.error
   }
   if (beans.error && !['42P01', 'PGRST205'].includes(beans.error.code)) throw beans.error
+  for (const result of [packages, adjustments]) {
+    if (result.error && !['42P01', 'PGRST205'].includes(result.error.code)) throw result.error
+  }
   if (!members.data?.some(member => member.user_id === user)) {
     await db.delete('details', [user, roomId])
     throw new DiaryError('Du hast keinen Zugriff mehr auf diesen Raum.')
@@ -95,6 +100,7 @@ export async function loadRoom(user: string, roomId: string): Promise<RoomData> 
   const data: RoomData = {
     room: room.data, members: members.data, invites: invites.data ?? [],
     grinders: grindersWithPhotos, baskets: basketsWithPhotos, profiles: profiles.data ?? [], shots, beans: beansWithPhotos,
+    packages: packages.error ? undefined : packages.data ?? [], packageAdjustments: adjustments.data ?? [],
   }
   await db.put('details', data, [user, roomId])
   return data

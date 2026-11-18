@@ -1,12 +1,20 @@
-import { BasketIcon, BeanIcon, CalendarIcon, EditIcon, GrindIcon, HistoryIcon, LogoutIcon, ProfileIcon, ReloadIcon, SettingsIcon, TimerIcon, TrashIcon } from './Icons'
+import { OrbitHome } from './OrbitHome'
+import { useDesign } from './useDesign'
+import { InstallHelp } from './InstallHelp'
+import { BasketIcon, BeanIcon, CalendarIcon, EditIcon, GrindIcon, HistoryIcon, LogoutIcon, PressureIcon, ProfileIcon, ReloadIcon, SettingsIcon, TimerIcon, TrashIcon } from './Icons'
 import { useCallback, useEffect, useRef, useState, type FormEvent } from 'react'
 import { createRoot } from 'react-dom/client'
 import { BeanPhoto, Beans } from './Beans'
 import { Admin } from './Admin'
+import { GlassEffects } from './GlassEffects'
 import { Appearance } from './Appearance'
 import { DialSettings } from './DialSettings'
 import { SwipeToDelete } from './SwipeToDelete'
+import { ShotNote } from './ShotNote'
+import { ShotAdvice } from './ShotAdvice'
 import { ShotRating } from './ShotRating'
+import { packageForShot } from './packages'
+import { ShotDialog } from './ShotDialog'
 import { ShotForm } from './ShotForm'
 import { HistoryFilters } from './HistoryFilters'
 import { useRoomNavigation } from './useRoomNavigation'
@@ -18,6 +26,9 @@ import { errorText, Notice } from './ui'
 import '@fontsource-variable/dm-sans'
 import '@fontsource/instrument-serif/400.css'
 import './style.css'
+import './glass.css'
+import './orbit.css'
+import './material.css'
 
 const timestamp = new Intl.DateTimeFormat('de-DE', { dateStyle: 'medium', timeStyle: 'short' })
 const shortTimestamp = new Intl.DateTimeFormat('de-DE', { day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit' })
@@ -138,7 +149,10 @@ function RoomView({ room, user, online, pending, synchronize }: {
 }) {
   const [data, setData] = useState<RoomData>()
   const [error, setError] = useState('')
+  const design = useDesign()
   const { page, setPage, form, setForm, stage, setStage, closeForm, formToken } = useRoomNavigation(user + ':' + room)
+  const [selectedShot, setSelectedShot] = useState<string | null>(null)
+  useEffect(() => { setSelectedShot(null); document.getElementById('root')?.scrollTo({ top: 0 }) }, [page, form])
   const [historyFilter, setHistoryFilter] = useState({ ...emptyHistoryFilter })
   const refreshInProgress = useRef<Promise<void> | null>(null)
   const active = useRef(false)
@@ -185,7 +199,7 @@ function RoomView({ room, user, online, pending, synchronize }: {
     if (!online) return
     void refresh()
     const channel = api.channel('room-' + room)
-    for (const table of ['shots', 'grinders', 'baskets', 'profiles', 'beans', 'rooms']) {
+    for (const table of ['shots', 'grinders', 'baskets', 'profiles', 'beans', 'bean_packages', 'package_adjustments', 'rooms', 'members']) {
       channel.on('postgres_changes', {
         event: '*', schema: 'public', table, filter: (table === 'rooms' ? 'id' : 'room_id') + '=eq.' + room,
       }, () => void refresh())
@@ -196,6 +210,11 @@ function RoomView({ room, user, online, pending, synchronize }: {
   }, [online, refresh, room])
 
   async function save(fields: ShotFields, importKey: string | null) {
+    if (data?.packages) {
+      const editing = form && form !== true ? form : undefined
+      fields = { ...fields, package_id: editing && (fields.bean_id ?? null) === (editing.bean_id ?? null)
+        ? editing.package_id ?? null : packageForShot(data.packages, fields.bean_id, fields.brewed_at)?.id ?? null }
+    }
     if (form && form !== true) {
       if (!navigator.onLine) throw new DiaryError('Zum Bearbeiten brauchst du eine Internetverbindung.')
       const result = await api.from('shots').update(fields).eq('id', form.id).eq('version', form.version)
@@ -216,14 +235,15 @@ function RoomView({ room, user, online, pending, synchronize }: {
     await refresh()
   }
 
-  async function rateShot(shot: Shot, rating: number | null) {
-    if (!navigator.onLine) throw new DiaryError('Zum Bewerten brauchst du eine Internetverbindung.')
-    const result = await api.from('shots').update({ rating }).eq('id', shot.id).eq('version', shot.version).select('*').maybeSingle<Shot>()
+  async function updateFeedback(shot: Shot, fields: Partial<ShotFields>) {
+    if (shot.author_id !== user) throw new DiaryError('Du kannst nur eigene Bezüge ändern.')
+    if (!navigator.onLine) throw new DiaryError('Zum Speichern brauchst du eine Internetverbindung.')
+    const result = await api.from('shots').update(fields).eq('id', shot.id).eq('version', shot.version).select('*').maybeSingle<Shot>()
     if (result.error) {
       if (['42703', 'PGRST204'].includes(result.error.code)) throw new DiaryError('Die Bewertungsfunktion muss noch in der Datenbank eingerichtet werden.')
       throw result.error
     }
-    if (!result.data) { await refresh(); throw new DiaryError('Der Bezug wurde inzwischen geändert. Bitte wähle deine Bewertung erneut.') }
+    if (!result.data) { await refresh(); throw new DiaryError('Der Bezug wurde inzwischen geändert. Bitte prüfe deine Angaben erneut.') }
     const updated = result.data
     setData(previous => previous ? { ...previous, shots: previous.shots.map(item => item.id === updated.id ? updated : item) } : previous)
   }
@@ -280,6 +300,7 @@ function RoomView({ room, user, online, pending, synchronize }: {
     .filter(shot => !deletions.some(entry => entry.shot.id === shot.id))
     .sort((a, b) => Date.parse(b.brewed_at) - Date.parse(a.brewed_at))
   const filteredTimeline = filterHistory(timeline, data.beans ?? [], historyFilter)
+  const consumptionShots = timeline.filter(shot => !queued.some(item => item.shot.id === shot.id && item.error))
   return <div className="room-view">
     {!form && page !== 'home' && <h1 className="page-title">{({ history: 'Verlauf', beans: 'Bohnen', settings: 'Einstellungen' })[page]}</h1>}
     <Notice>{error}</Notice>
@@ -290,15 +311,16 @@ function RoomView({ room, user, online, pending, synchronize }: {
       </div>)}
     </div>}
     <div className="room-content" key={form ? 'form' : page}>
-    {form ? <ShotForm key={form === true ? 'new' : form.id} data={{ ...data, shots: timeline }} user={user} refresh={refresh}
+    {form ? <ShotForm key={form === true ? 'new' : form.id} data={{ ...data, shots: timeline.filter(shot => !queued.some(item => item.shot.id === shot.id && item.error)) }} user={user} refresh={refresh}
       editing={form === true ? undefined : form} draftKey={`espresso-draft:${user}:${room}:${formToken}`} stage={stage} onStageChange={setStage} onSave={save} onClose={() => setForm(undefined)} /> : <>
-    {page === 'home' && <section className="home-screen">
-      <button className="brew-hero" onClick={() => setForm(true)}><span className="hero-cup"><Cup /></span><span><small>Zeit für Espresso</small><strong>Neuer Bezug</strong><span>In {data.profiles.some(profile => !profile.archived) ? 'fünf' : 'vier'} Schritten zu deinem Kaffee</span></span><b>＋</b></button>
+    {page === 'home' && design === 'orbit' && <OrbitHome shots={timeline.length} beans={data.beans?.length ?? 0} onBrew={() => setForm(true)} onHistory={() => setPage('history')} onBeans={() => setPage('beans')} />}
+    {page === 'home' && design !== 'orbit' && <section className="home-screen">
+      <button className="brew-hero" onClick={() => setForm(true)}><span className="hero-cup"><Cup /></span><span><small>Zeit für Espresso</small><strong>Neuer Bezug</strong><span>In fünf Schritten zu deinem Kaffee</span></span><b>＋</b></button>
       <div className="home-links"><button onClick={() => setPage('history')}><span><HistoryIcon /></span><strong>Verlauf</strong><small>{timeline.length} Bezüge entdecken →</small></button><button onClick={() => setPage('beans')}><span><BeanIcon /></span><strong>Deine Bohnen</strong><small>{data.beans?.length ?? 0} Kaffeesorten →</small></button></div>
       <div className="section-heading"><h2>Letzte Bezüge</h2>{timeline.length > 0 && <button className="quiet" onClick={() => setPage('history')}>Alle ansehen →</button>}</div>
     </section>}
-    {page === 'beans' && <Beans data={data} refresh={refresh} hideHeading />}
-    {page === 'settings' && <><Appearance /><DialSettings />{admin && online ? <Admin data={data} refresh={refresh} /> : <p className="panel">{online ? 'Die Raumeinstellungen werden von deinem Raum-Admin verwaltet.' : 'Zum Ändern der Einstellungen brauchst du eine Internetverbindung.'}</p>}</>}
+    {page === 'beans' && <Beans data={{ ...data, shots: consumptionShots }} pendingIds={queued.filter(item => !item.error).map(item => item.shot.id)} refresh={refresh} hideHeading />}
+    {page === 'settings' && <><Appearance /><DialSettings user={user} />{online ? <Admin data={data} refresh={refresh} admin={admin} /> : <p className="panel">Zum Ändern der Einstellungen brauchst du eine Internetverbindung.</p>}</>}
     {(page === 'history' || page === 'home') && <>
       {page === 'history' && <HistoryFilters value={historyFilter} onChange={setHistoryFilter} shots={timeline} beans={data.beans ?? []} count={filteredTimeline.length} />}
       <section className="chronicle">
@@ -310,25 +332,41 @@ function RoomView({ room, user, online, pending, synchronize }: {
           const grinder = data.grinders.find(entry => entry.id === shot.grinder_id)
           const basket = data.baskets.find(entry => entry.id === shot.basket_id)
           const bean = data.beans?.find(bean => bean.id === shot.bean_id)
-          return <SwipeToDelete key={shot.id} enabled={!item && shot.author_id === user && online} onDelete={() => void deleteShot(shot)}><article className="panel entry history-entry" onClick={event => {
+          return <SwipeToDelete key={shot.id} enabled={!item && shot.author_id === user && online} onDelete={() => void deleteShot(shot)}><article className="panel entry history-entry" tabIndex={0} aria-haspopup="dialog" aria-label={`Bezug von ${shot.author_name} öffnen`} onKeyDown={event => { if (event.target === event.currentTarget && (event.key === "Enter" || event.key === " ")) { event.preventDefault(); setSelectedShot(shot.id) } }} onClick={event => {
             if ((event.target as Element).closest('button, a, input, select, textarea, summary, .shot-rating')) return
-            const details = event.currentTarget.querySelector('details')
-            if (details) details.open = !details.open
+            setSelectedShot(shot.id)
           }}>
             <div className="entry-summary">
               <div className="entry-heading"><div className="entry-title"><h3>{bean?.name || shot.profile || 'Espresso'}</h3><span className="entry-author"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.6" aria-hidden="true"><circle cx="12" cy="8" r="3" /><path d="M5 21v-2a7 7 0 0 1 14 0v2" /></svg>{shot.author_name}</span></div><span className="entry-date" title={timestamp.format(new Date(shot.brewed_at))}><CalendarIcon /><time dateTime={shot.brewed_at}>{shortTimestamp.format(new Date(shot.brewed_at))}</time></span></div>
               <div className="entry-photo">{bean ? <BeanPhoto bean={bean} /> : <span className="bean-symbol" aria-hidden="true"><Cup /></span>}</div>
               <div className="entry-copy">
-                <p className="meta entry-byline entry-settings"><span title="Mahlgrad" aria-label={`Mahlgrad: ${shot.grind == null ? 'nicht angegeben' : formatNumber(shot.grind)}`}><GrindIcon />{shot.grind == null ? '–' : formatNumber(shot.grind)}</span><span title="Profil"><ProfileIcon />{shot.profile || 'Ohne Profil'}</span></p>
-                <p className="entry-recipe"><span aria-label="Dosis"><BasketIcon />{shot.dose == null ? '–' : formatNumber(shot.dose)} <small>g</small></span><span aria-hidden="true">→</span><span aria-label="Output"><Cup />{shot.output == null ? '–' : formatNumber(shot.output)} <small>g</small></span><span className="recipe-divider" aria-hidden="true">·</span><span aria-label="Laufzeit"><TimerIcon />{shot.duration == null ? '–' : formatNumber(shot.duration)} <small>s</small></span></p>
+                <p className="meta entry-byline entry-settings"><span title="Mahlgrad" aria-label={`Mahlgrad: ${shot.grind == null ? 'nicht angegeben' : formatNumber(shot.grind)}`}><GrindIcon />{shot.grind == null ? '–' : formatNumber(shot.grind)}</span><span title="Profil"><ProfileIcon />{shot.profile || 'Ohne Profil'}</span>{shot.max_pressure != null && <span title="Maximaldruck" aria-label={`Maximaldruck: ${formatNumber(shot.max_pressure)} bar`}><PressureIcon />{formatNumber(shot.max_pressure)} bar</span>}</p>
+                <p className="entry-recipe"><span aria-label="Dosis"><BasketIcon />{shot.dose == null ? '–' : formatNumber(shot.dose)} <small>g</small></span><span className="recipe-arrow" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" strokeLinecap="round" strokeLinejoin="round"><path d="M4 12h16m-6-6 6 6-6 6" /></svg></span><span aria-label="Output"><Cup />{shot.output == null ? '–' : formatNumber(shot.output)} <small>g</small></span><span className="recipe-divider" aria-hidden="true">·</span><span aria-label="Laufzeit"><TimerIcon />{shot.duration == null ? '–' : formatNumber(shot.duration)} <small>s</small></span></p>
               </div>
-            <ShotRating value={shot.rating ?? null} editable={shot.author_id === user && online && !item}
-              unavailable={shot.author_id !== user ? undefined : item ? 'Nach Synchronisierung bewertbar' : !online ? 'Zum Bewerten online gehen' : undefined}
-              onChange={rating => rateShot(shot, rating)} />
+            {(shot.note || shot.grind_advice) && <div className="entry-feedback">
+            {shot.note && <p className="shot-note">{shot.note}</p>}
+            {shot.grind_advice && <p className="meta">Nächster Mahlgrad: {shot.grind_advice === 'coarser' ? 'Gröber' : shot.grind_advice === 'finer' ? 'Feiner' : shot.grind_target != null ? formatNumber(shot.grind_target) : ''}</p>}
+            </div>}
+            <ShotRating value={shot.rating ?? null} editable={false} onChange={async () => {}} />
             </div>
 
             {item && <span className="status">{item.error || 'Wartet auf Synchronisierung'}</span>}
-            <details className="entry-details"><summary aria-label="Bezugsdetails ein- oder ausklappen">Bezugsdetails ein- oder ausklappen</summary><div className="entry-detail-body">
+            {selectedShot === shot.id && <ShotDialog image={bean ? <BeanPhoto bean={bean} /> : <span className="bean-symbol"><BeanIcon /></span>} title={bean?.name || shot.profile || 'Espresso'} onClose={() => setSelectedShot(null)}>
+              <p className="meta shot-dialog-line"><CalendarIcon /><span>{shot.author_name} · {timestamp.format(new Date(shot.brewed_at))}</span></p>
+              <dl className="shot-dialog-values">{[
+                ['Kaffeemenge', <BasketIcon />, shot.dose == null ? '–' : formatNumber(shot.dose) + ' g'],
+                ['Output', <Cup />, shot.output == null ? '–' : formatNumber(shot.output) + ' g'],
+                ['Laufzeit', <TimerIcon />, shot.duration == null ? '–' : formatNumber(shot.duration) + ' s'],
+                ['Mahlgrad', <GrindIcon />, shot.grind == null ? '–' : formatNumber(shot.grind)],
+                ['Profil', <ProfileIcon />, shot.profile || 'Ohne Profil'],
+              ].map(([label, icon, value]) => <div key={String(label)}><dt>{icon}{label}</dt><dd>{value}</dd></div>)}</dl>
+              {shot.max_pressure != null && <p className="shot-dialog-line"><PressureIcon /><span>Maximaldruck: {formatNumber(shot.max_pressure)} bar</span></p>}
+              <ShotNote key={"note-" + shot.id} note={shot.note} own={shot.author_id === user} available={online && !item} onSave={note => updateFeedback(shot, { note })} />
+              {shot.grind_advice && <p>Nächster Mahlgrad: {shot.grind_advice === 'coarser' ? 'Gröber' : shot.grind_advice === 'finer' ? 'Feiner' : shot.grind_target != null ? formatNumber(shot.grind_target) : ''}</p>}
+              <ShotRating value={shot.rating ?? null} editable={shot.author_id === user && online && !item} onChange={rating => updateFeedback(shot, { rating })} />
+              {shot.bean_id && grinder && <ShotAdvice key={"advice-" + shot.id} shot={shot} grinder={grinder} editable={shot.author_id === user && online && !item} onSave={fields => updateFeedback(shot, fields)} />}
+              {item && <p className="status">{item.error || 'Wartet auf Synchronisierung'}</p>}
+              <div className="entry-detail-body">
               <div className="entry-detail-info">
               {shot.temperature != null && <p className="meta">Temperatur: {formatNumber(shot.temperature)} °C</p>}
               {(grinder || basket) && <p className="meta equipment-line">{[
@@ -336,19 +374,20 @@ function RoomView({ room, user, online, pending, synchronize }: {
                 basket && basket.name,
               ].filter(Boolean).join(' / ')}</p>}
               </div>
-              {!item && shot.author_id === user && online && <div className="actions entry-detail-actions"><button className="quiet" aria-label="Bearbeiten" title="Bearbeiten" onClick={() => setForm(shot)}><EditIcon /></button><button className="quiet delete-shot" aria-label="Bezug löschen" title="Löschen" onClick={() => void deleteShot(shot)}><TrashIcon /></button></div>}
+              {!item && shot.author_id === user && online && <div className="actions entry-detail-actions"><button className="quiet" aria-label="Bearbeiten" title="Bearbeiten" onClick={() => { setSelectedShot(null); setForm(shot) }}><EditIcon /></button><button className="quiet delete-shot" aria-label="Bezug löschen" title="Löschen" onClick={() => { setSelectedShot(null); void deleteShot(shot) }}><TrashIcon /></button></div>}
               {item?.error && <button className="quiet" onClick={() => void discardPending(item)}>Lokalen Eintrag verwerfen</button>}
-            </div></details>
+            </div></ShotDialog>}
           </article></SwipeToDelete>
         })}
       </section>
     </>}
-    {page !== 'history' && <button type="button" className="primary quick-brew" onClick={() => setForm(true)}><span aria-hidden="true">＋</span> Neuer Bezug</button>}
-    <nav className="bottom-nav" aria-label="Hauptnavigation">{([
-      ['home', <Cup />, 'Start'], ['history', <HistoryIcon />, 'Verlauf'], ['beans', <BeanIcon />, 'Bohnen'], ['settings', <SettingsIcon />, 'Einstellungen'],
-    ] as const).map(([id, icon, label]) => <button key={id} aria-current={page === id ? 'page' : undefined} onClick={() => setPage(id)}><span aria-hidden="true">{icon}</span>{label}</button>)}</nav>
+    <button type="button" className="primary quick-brew" onClick={() => setForm(true)}><span aria-hidden="true">＋</span> Neuer Bezug</button>
+
     </>}
     </div>
+    <nav className="bottom-nav" aria-label="Hauptnavigation">{([
+      ['home', <Cup />, 'Start'], ['history', <HistoryIcon />, 'Verlauf'], ['beans', <BeanIcon />, 'Bohnen'], ['settings', <SettingsIcon />, 'Einstellungen'],
+    ] as const).map(([id, icon, label]) => <button key={id} aria-current={!form && page === id ? 'page' : undefined} onClick={() => setPage(id)}><span aria-hidden="true">{icon}</span>{label}</button>)}</nav>
   </div>
 }
 
@@ -460,6 +499,7 @@ function Workspace({ user }: { user: string }) {
       </div>
     </div></header>
     <main className="workspace">
+      <InstallHelp />
       {!rooms.length && online && <div className="room-bar"><button onClick={() => setCreating(true)}>＋ Raum erstellen</button></div>}
       <Notice>{error}</Notice>
       {online && (creating || invitation) && <RoomForm key={invitation?.id ?? 'create'} invitation={invitation}
@@ -506,4 +546,4 @@ function App() {
   return user ? <Workspace key={user} user={user} /> : <Login />
 }
 
-createRoot(document.getElementById('root')!).render(<App />)
+createRoot(document.getElementById('root')!).render(<><GlassEffects /><App /></>)

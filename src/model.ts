@@ -8,9 +8,17 @@ export type Grinder = Equipment & {
   image_url: string | null; source_url: string | null
 }
 export type Basket = Equipment & { name: string; capacity: number | null }
-export type Profile = { id: string; name: string; archived: boolean; sort_order?: number; ever_used?: boolean }
+export type Profile = { id: string; name: string; archived: boolean; flow_based?: boolean; sort_order?: number; ever_used?: boolean }
 export type Bean = { id: string; room_id: string; name: string; roaster: string; archived: boolean; photo_path?: string | null; photo?: Blob }
+export type BeanPackage = { id: string; room_id: string; bean_id: string; quantity: number; carried_in: number; transferred_out: number; closed_remaining?: number | null; opened_at: string; closed_at: string | null; close_reason: 'finished' | 'carried' | 'discarded' | null }
+export type PackageAdjustment = { id: string; room_id: string; bean_id: string; package_id: string; amount: number; reason: string; created_at: string }
 export type ShotFields = {
+  package_id?: string | null
+  note?: string | null
+  flow_based?: boolean
+  max_pressure?: number | null
+  grind_advice?: 'coarser' | 'finer' | 'exact' | null
+  grind_target?: number | null
   rating?: number | null
   bean_id?: string | null
   brewed_at: string; grinder_id: string | null; basket_id: string | null; grind: number | null
@@ -21,7 +29,7 @@ export type NewShot = ShotFields & { id: string; room_id: string; import_key: st
 export type Shot = NewShot & { author_id: string; author_name: string; version: number }
 export type RoomData = {
   room: Room; members: Member[]; invites: Invite[]; grinders: Grinder[]
-  baskets: Basket[]; profiles: Profile[]; shots: Shot[]; beans?: Bean[]
+  baskets: Basket[]; profiles: Profile[]; shots: Shot[]; beans?: Bean[]; packages?: BeanPackage[]; packageAdjustments?: PackageAdjustment[]
 }
 export type Pending = { user: string; shot: NewShot; author: string; error?: string }
 
@@ -96,3 +104,33 @@ export async function parseGaggiMate(raw: string): Promise<{
     incomplete: data.incomplete === true || data.duration <= 0 || data.trailingBytes > 0,
   }
 }
+
+export function profileOptions(profiles: Profile[], shots: Shot[], user: string, selected: string): string[] {
+  const lastUsed = new Map<string, number>()
+  for (const shot of shots) {
+    if (shot.author_id !== user || !shot.profile) continue
+    const time = Date.parse(shot.brewed_at)
+    if (Number.isFinite(time)) lastUsed.set(shot.profile, Math.max(lastUsed.get(shot.profile) ?? 0, time))
+  }
+  const names = [...new Set([...profiles.filter(p => !p.archived).map(p => p.name), selected].filter(Boolean))]
+  names.sort((a, b) => (lastUsed.get(b) ?? 0) - (lastUsed.get(a) ?? 0))
+  return [...names, '']
+}
+
+export function latestBeanShot(shots: Shot[], bean: string, grinder: string): Shot | undefined {
+  if (!bean || !grinder) return undefined
+  return shots.filter(s => s.bean_id === bean && s.grinder_id === grinder)
+    .sort((a, b) => Date.parse(b.brewed_at) - Date.parse(a.brewed_at) || a.id.localeCompare(b.id))[0]
+}
+export function beanGrind(shots: Shot[], bean: string, grinder?: Grinder): number {
+  if (!grinder) return 0
+  const last = latestBeanShot(shots.filter(s => s.grind != null), bean, grinder.id)
+  return last?.grind != null && onScale(last.grind, grinder.minimum, grinder.maximum, grinder.step) ? last.grind : grinder.minimum
+}
+export function adviceText(shot: Pick<ShotFields, 'grind_advice' | 'grind_target'>): string {
+  return shot.grind_advice === 'coarser' ? 'Gröber' : shot.grind_advice === 'finer' ? 'Feiner'
+    : shot.grind_advice === 'exact' && shot.grind_target != null ? formatNumber(shot.grind_target) : ''
+}
+
+// Stable stage IDs preserve open drafts when the display order changes.
+export const shotSteps: readonly number[] = [0, 2, 1, 3, 4]

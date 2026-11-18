@@ -57,7 +57,7 @@ export default defineConfig(({ mode }) => ({
         purpose: 'any maskable',
       })),
     },
-    workbox: { navigateFallbackDenylist: [/^\/api\//], globPatterns: ['**/*.{js,css,html,png,woff2}'] },
+    workbox: { navigateFallbackDenylist: [/^\/api\//], globPatterns: ['**/*.{js,css,html,png,svg,woff2}'] },
   })],
   server: { fs: { deny: ['.env', '.env.*', '.dev.vars*', '*.{crt,pem}', '**/.git/**'] } },
 }))
